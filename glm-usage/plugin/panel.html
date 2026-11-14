@@ -78,7 +78,12 @@
     --glow:0 10px 34px rgba(0,0,0,.35);
   }
   * { box-sizing:border-box; margin:0; }
-  html { background:var(--bg); }
+  /* 细滚动条：全局覆盖所有滚动容器（文件活动/事件/Browser/DNA 等），不再挤占内容列 */
+  ::-webkit-scrollbar { width:8px; height:8px; }
+  ::-webkit-scrollbar-thumb { background:color-mix(in srgb,var(--fg) 16%,transparent); border-radius:99px; border:2px solid transparent; background-clip:content-box; }
+  ::-webkit-scrollbar-thumb:hover { background:color-mix(in srgb,var(--fg) 34%,transparent); border:2px solid transparent; background-clip:content-box; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background:transparent; }
+  html { background:var(--bg); scrollbar-gutter:stable; } /* 滚动条槽常驻：切换长短页面时视口宽度不抖 */
   body { color:var(--fg); font:13.5px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; padding:20px 16px 40px; -webkit-font-smoothing:antialiased; }
   .wrap { max-width:1060px; margin:0 auto; }
   .top { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:2px; }
@@ -99,6 +104,18 @@
   [data-theme="dark"] .themeBtn .maskC { cx:17.3px; cy:2.9px; }
   [data-theme="light"] .themeBtn .rays line { opacity:1; transform:rotate(0deg) scale(1); }
   [data-theme="light"] .themeBtn .maskC { cx:30px; cy:-2px; }
+  /* 切换/刷新过渡：内容淡入上移；图表元素从 0 增长 */
+  .swapAnim { animation: swapIn .32s var(--ease); }
+  @keyframes swapIn { from { opacity:0; transform:translateY(7px); } }
+  .bars > div { transition:height .45s var(--ease); }
+  .item .ib > i { transition:width .45s var(--ease); }
+  .item .ib > i, .bars > div { will-change:width,height; }
+  .lines path { transition:stroke-dashoffset .8s var(--ease); }
+  .meter > i { position:relative; overflow:hidden; }
+  .meter > i::after { content:""; position:absolute; inset:0; transform:translateX(-110%); background:linear-gradient(90deg, transparent, rgba(255,255,255,.4), transparent); }
+  .meter > i.sweep::after { animation:meterSweep .9s var(--ease); }
+  @keyframes meterSweep { to { transform:translateX(110%); } }
+  .topsel { background:var(--bg2); border:1px solid var(--bd); color:var(--fg); border-radius:8px; padding:3px 6px; font-size:11.5px; outline:none; }
   /* 使用详情 + 系统健康度（官方数据，合并自 glm-usage-dashboard v1.6.3） */
   .detail { margin-top:14px; }
   .detailHead { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
@@ -258,7 +275,7 @@
   .lc-donut { position:relative; flex:none; }
   .lc-donut svg { display:block; }
   .lc-donut-track { stroke:color-mix(in srgb,currentColor 12%,transparent); }
-  .lc-donut-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; pointer-events:none; text-align:center; padding:0 7px; }
+  .lc-donut-center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0; pointer-events:none; text-align:center; padding:0 5px; }
   .lc-donut-center b { line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; font-variant-numeric:tabular-nums; }
   .lc-donut-center span { color:var(--sub); white-space:nowrap; }
   .legendGrid { flex:1; min-width:180px; display:grid; grid-template-columns:1fr 1fr; gap:4px 18px; font-size:11.5px; align-content:center; }
@@ -313,6 +330,8 @@
   .sPill { flex:none; font-size:10px; padding:1px 8px; border-radius:var(--radius-full); border:1px solid var(--bd); color:var(--dim); background:color-mix(in srgb,var(--fg) 4%,transparent); }
   .sBody { display:flex; gap:14px; align-items:center; min-width:0; }
   .sStats { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; font-size:11px; }
+  .sStat { white-space:nowrap; }
+  .sStat .k { flex:none; }
   .sStat { display:flex; justify-content:space-between; gap:10px; font-variant-numeric:tabular-nums; }
   .sStat .k { color:var(--dim); }
   .sStat .v { color:var(--fg); font-weight:600; font-family:var(--mono); font-size:11px; }
@@ -321,6 +340,11 @@
   .sPreview .v { flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--fg); font-size:11px; }
 
   /* ===== 上下文页（1:1 对齐 dsh-context 会话 Context 仪表盘） ===== */
+  /* ===== 卡片最小高度：数据加载/切换时骨架不塌、布局不跳 ===== */
+  .ctxTop .card { min-height:230px; }
+  .ovMid .card, .ctxMid .card { min-height:170px; }
+  #tab-context .card:nth-child(n) { contain:layout; }
+  #detailCard, #healthCard { min-height:150px; }
   .ctxHead { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
   .ctxHead select { background:var(--card2); border:1px solid var(--bd); color:var(--fg); border-radius:8px; padding:4px 10px; font:12px var(--mono); max-width:340px; outline:none; }
   .livechip { display:inline-flex; align-items:center; gap:6px; font-size:11px; color:var(--ok); border:1px solid color-mix(in srgb,var(--ok) 40%,transparent); border-radius:var(--radius-full); padding:2px 10px; }
@@ -447,6 +471,10 @@
     <span class="chip">数据源 <b>本地实时</b></span>
     <div class="topright">
       <span class="countdown" id="countdown">—</span>
+      <select id="refreshsel" class="topsel" onchange="saveRefresh(this.value)" title="自动刷新频率">
+        <option value="10">10 秒</option><option value="30">30 秒</option><option value="60">1 分钟</option>
+        <option value="120">2 分钟</option><option value="300">5 分钟</option>
+      </select>
       <button onclick="manualRefresh()">刷新</button>
       <button class="icon themeBtn" id="themebtn" onclick="toggleTheme()" title="切换亮/暗主题" aria-label="切换亮/暗主题">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
@@ -480,10 +508,6 @@
       <div class="setbox">
         <span class="grp">Key <input id="keyinput" type="password" placeholder="粘贴 bigmodel.cn 控制台的 API Key（长期有效）"></span>
         <button onclick="saveKey(0)">保存</button><button onclick="saveKey(1)">清除</button>
-        <span class="grp">刷新 <select id="refreshsel" onchange="saveRefresh(this.value)">
-          <option value="10">10 秒</option><option value="30">30 秒</option><option value="60">1 分钟</option>
-          <option value="120">2 分钟</option><option value="300">5 分钟</option>
-        </select></span>
         <span id="keystatus">检查中…</span>
       </div>
     </details>
@@ -737,7 +761,7 @@ function donut(segs, centerTop, centerSub, size) {
     });
   }
   svg += "</svg>";
-  var f1 = Math.max(11, Math.round(size * 0.13)), f2 = Math.max(9, Math.round(size * 0.105));
+  var f1 = Math.max(10, Math.round(size * 0.12)), f2 = Math.max(8.5, Math.round(size * 0.095));
   var center = '<div class="lc-donut-center"><b style="font-size:' + f1 + 'px">' + centerTop + "</b>"
     + (centerSub != null ? '<span style="font-size:' + f2 + 'px">' + centerSub + "</span>" : "") + "</div>";
   return '<div class="lc-donut" style="width:' + size + "px;height:" + size + 'px">' + svg + center + "</div>";
@@ -860,8 +884,12 @@ function patchSection(el, b, l1html, l2html, sparkHtml, sparkKey) {
   pct.style.color = lvColor(b.percent);
   reset.textContent = "重置 " + (b.reset_at ? until(b.reset_at, true) + "后" : "—");
   reset.className = "qReset" + (b.reset_at && b.reset_at - Math.floor(Date.now() / 1000) < 1800 ? " soon" : "");
-  bar.style.width = b.percent + "%";
-  bar.className = lvClass(b.percent);
+  if (bar.dataset.pct !== String(b.percent)) {
+    bar.style.width = b.percent + "%";
+    bar.dataset.pct = String(b.percent);
+    bar.classList.remove("sweep"); void bar.offsetWidth; bar.classList.add("sweep"); // 刷新扫光
+  }
+  bar.className = lvClass(b.percent) + (bar.classList.contains("sweep") ? " sweep" : "");
   if (l1 && l1.innerHTML !== l1html) l1.innerHTML = l1html;
   if (l2 && l2html && l2.innerHTML !== l2html) l2.innerHTML = l2html;
   if (sb && built.spark[sparkKey] !== sparkHtml) { built.spark[sparkKey] = sparkHtml; sb.innerHTML = sparkHtml; }
@@ -952,7 +980,7 @@ var state = {
   tab: "usage", range: "7d", insights: null, insightsAt: 0,
   sessions: [], sortKey: "updated", search: "", group: "",
   sessionId: null, ctx: null, browser: null, dna: "tree", trendMode: "total",
-  fleet: null, trendSel: -1
+  fleet: null, trendSel: -1, lastActivity: 0, silent: false
 };
 function callTool(name, args) {
   return window.__bridgeCall("tools/call", { name: name, arguments: args || {} }).then(function (r) {
@@ -961,10 +989,52 @@ function callTool(name, args) {
     return j.data;
   });
 }
+function animateSwap(el) { if (!el) return; el.classList.remove("swapAnim"); void el.offsetWidth; el.classList.add("swapAnim"); }
 function showErr(id, msg) {
   var el = document.getElementById(id);
   if (msg) { el.textContent = msg; el.style.display = "block"; } else el.style.display = "none";
 }
+/* 平滑 DOM：内容没变就不动（实时刷新不闪烁、滚动位置不丢）；返回是否真的更新 */
+function patchHTML(id, html) {
+  var el = document.getElementById(id);
+  if (!el || el.innerHTML === html) return false;
+  el.innerHTML = html;
+  return true;
+}
+
+/* ---------- 实时刷新（跟随对话进度：会话活跃时秒级，空闲时降频） ---------- */
+var liveTimer = null;
+function sessionActive() {
+  // 当前会话 3 分钟内有更新视为活跃（model-io 尾部解析 / 会话 updated 均会刷新该值）
+  return state.lastActivity && (Date.now() - state.lastActivity < 3 * 60000);
+}
+function liveInterval(base) { return sessionActive() ? base : base * 6; }
+function stopLive() {
+  if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+}
+function startLive() {
+  stopLive();
+  if (state.tab === "context") {
+    liveTimer = setInterval(function () {
+      if (document.hidden || !state.sessionId) return;
+      loadContext(true);
+      if (!liveBrowserAt || Date.now() - liveBrowserAt > liveInterval(4000)) { liveBrowserAt = Date.now(); loadBrowser(true); }
+    }, 2200);
+  } else if (state.tab === "insights") {
+    liveTimer = setInterval(function () {
+      if (document.hidden) return;
+      if (Date.now() - state.insightsAt < liveInterval(6000)) return;
+      loadInsights(true);
+    }, 2000);
+  } else if (state.tab === "agent") {
+    liveTimer = setInterval(function () {
+      if (document.hidden) return;
+      if (Date.now() - (state.fleetAt || 0) < liveInterval(5000)) return;
+      ensureFleet(true);
+    }, 2000);
+  }
+}
+var liveBrowserAt = 0;
 
 /* ---------- 标签页 ---------- */
 document.getElementById("tabs").addEventListener("click", function (ev) {
@@ -974,12 +1044,13 @@ document.getElementById("tabs").addEventListener("click", function (ev) {
 });
 function switchTab(tab) {
   state.tab = tab;
+  stopLive();
   document.querySelectorAll("#tabs button").forEach(function (b) { b.classList.toggle("on", b.dataset.tab === tab); });
   document.querySelectorAll(".tabpage").forEach(function (p) { p.hidden = p.id !== "tab-" + tab; });
   if (tab === "usage") load();
-  if (tab === "insights") ensureInsights();
-  if (tab === "context") ensureContext();
-  if (tab === "agent") ensureFleet();
+  if (tab === "insights") { ensureInsights(); startLive(); }
+  if (tab === "context") { ensureContext(); startLive(); }
+  if (tab === "agent") { ensureFleet(); startLive(); }
 }
 
 /* ---------- 洞察页 ---------- */
@@ -1005,8 +1076,8 @@ function ensureInsights() {
   if (!state.insights || Date.now() - state.insightsAt > 60000) loadInsights();
   else renderInsights();
 }
-async function loadInsights() {
-  showErr("insErr", null);
+async function loadInsights(silent) {
+  if (!silent) showErr("insErr", null);
   try {
     state.insights = await callTool("get_insights", { range: state.range });
     state.insightsAt = Date.now();
@@ -1014,8 +1085,9 @@ async function loadInsights() {
     renderInsights();
     fillSessionSelect();
     renderSessions();
+    ["insKpis", "insDailyChart", "insTokensBody", "insTimingBody"].forEach(function (id) { animateSwap(document.getElementById(id)); });
   } catch (e) {
-    showErr("insErr", "洞察获取失败：" + e.message);
+    if (!silent) showErr("insErr", "洞察获取失败：" + e.message);
   }
 }
 function renderInsights() {
@@ -1032,16 +1104,16 @@ function renderInsights() {
     { l: "工具调用", v: k.tool_calls, s: "工具执行 " + durMs(k.tool_ms), dim: false },
     { l: "活跃时长", v: durMs(k.active_ms), s: "模型调用 " + k.steps, dim: false },
   ];
-  document.getElementById("insKpis").innerHTML = kpis.map(function (x, i) {
+  patchHTML("insKpis", kpis.map(function (x, i) {
     return '<div class="kpi" style="--delay:' + i * 40 + 'ms"><div class="kl">' + x.l + '</div>'
       + '<div class="kv' + (x.dim ? " dim2" : "") + '">' + x.v + '</div><div class="ks">' + x.s + "</div></div>";
-  }).join("");
+  }).join(""));
   document.getElementById("insCacheSub").textContent = "缓存读 " + cnum(k.cache_read) + " · 写 " + cnum(k.cache_write);
   // 近 7 天用量（三段柱：缓存读绿 / 新输入蓝 / 输出橙）
   var daily = d.daily || [];
   document.getElementById("insDailySub").textContent = daily.length + " 天 · " + cnum(k.tokens) + " tokens";
   var maxDay = Math.max.apply(null, daily.map(function (x) { return x.tokens; }).concat([1]));
-  document.getElementById("insDailyChart").innerHTML = daily.slice(-30).map(function (x, i) {
+  patchHTML("insDailyChart", daily.slice(-30).map(function (x, i) {
     var h = function (v) { return Math.max(v / maxDay * 100, x.tokens ? 1.5 : 0); };
     var cr = x.cache_read || 0, fi = Math.max((x.input_t || 0) - cr, 0), ou = x.output_t || 0;
     return '<div class="col" style="--i:' + i + '" title="' + x.day + " · " + cnum(x.tokens) + " tok · " + x.steps + " 步 · " + x.sessions + " 会话"
@@ -1050,7 +1122,7 @@ function renderInsights() {
       + '<i style="height:' + h(fi) + '%;background:#3b82f6"></i>'
       + '<i style="height:' + h(cr) + '%;background:#22c55e"></i>'
       + '<span class="lb">' + x.day.slice(5) + "</span></div>";
-  }).join("");
+  }).join(""));
   // Token 统计环形（四段：缓存读/写/新输入/输出）
   document.getElementById("insCacheSub").textContent = "缓存读 " + cnum(k.cache_read) + " · 写 " + cnum(k.cache_write);
   var tokSegs = [
@@ -1059,14 +1131,14 @@ function renderInsights() {
     { n: "新输入", v: Math.max(k.input - k.cache_read - k.cache_write, 0), c: "#3b82f6" },
     { n: "输出", v: k.output, c: "#f59e0b" },
   ].filter(function (x) { return x.v > 0; });
-  document.getElementById("insTokensBody").innerHTML = donutLegendBlock(tokSegs, cnum(k.tokens), "总用量", 118);
+  patchHTML("insTokensBody", donutLegendBlock(tokSegs, cnum(k.tokens), "总用量", 118));
   document.getElementById("insTpsSub").textContent = "输出速度 " + k.tps + " tok/s";
   var timSegs = [
     { n: "首字等待 (TTFT)", v: k.ttft_ms, c: "#6366f1" },
     { n: "模型生成", v: Math.max(k.model_ms - k.ttft_ms, 0), c: "#3b82f6" },
     { n: "工具执行", v: k.tool_ms, c: "#14b8a6" },
   ].filter(function (s) { return s.v > 0; });
-  document.getElementById("insTimingBody").innerHTML = donutLegendBlock(timSegs, durMs(k.active_ms), "活跃时长", 118);
+  patchHTML("insTimingBody", donutLegendBlock(timSegs, durMs(k.active_ms), "活跃时长", 118));
   // 活跃度（固定 84 天，不受 range 影响）
   var days = d.heatmap || [];
   var mx = Math.max.apply(null, days.map(function (x) { return x.tokens; }).concat([1]));
@@ -1081,37 +1153,37 @@ function renderInsights() {
   heatHtml += days.map(function (x) {
     return '<i style="background:' + heatColor(x.tokens) + '" title="' + x.day + " · " + cnum(x.tokens) + " tok · " + x.steps + ' 步"></i>';
   }).join("");
-  document.getElementById("insHeatGrid").innerHTML = heatHtml;
+  patchHTML("insHeatGrid", heatHtml);
   document.getElementById("insHeatScale").innerHTML = '少 <i style="background:color-mix(in srgb,currentColor 6%,transparent)"></i>'
     + [0.25, 0.5, 0.75, 1].map(function (t) { return '<i style="background:color-mix(in srgb,#22c55e ' + Math.round((0.15 + t * 0.85) * 100) + '%,transparent)"></i>'; }).join("") + " 多";
   // 文件活动
   var files = d.files || [];
   document.getElementById("insFilesSub").textContent = files.length + " 个文件";
-  document.getElementById("insFilesList").innerHTML = files.slice(0, 12).map(function (f) {
+  patchHTML("insFilesList", files.slice(0, 12).map(function (f) {
     var op = f.edits ? '<span class="op e">改×' + f.edits + "</span>" : f.writes ? '<span class="op w">写×' + f.writes + "</span>" : '<span class="op r">读×' + f.reads + "</span>";
     return '<div class="fileRow">' + op + '<span class="fn" title="' + esc(f.full) + '">' + esc(f.file) + '</span><span class="ct">' + agoTs(f.last_at) + "</span></div>";
-  }).join("") || '<span class="empty" style="padding:18px 0">无文件活动</span>';
+  }).join("") || '<span class="empty" style="padding:18px 0">无文件活动</span>');
   // 工具
   var tls = d.tools || [];
   document.getElementById("insToolsSub").textContent = tls.length + " 个工具 · " + tls.reduce(function (a, x) { return a + x.calls; }, 0) + " 次调用";
   var maxT = Math.max.apply(null, tls.map(function (x) { return x.calls; }).concat([1]));
   var TOOL_COLORS = ["#f59e0b","#22c55e","#3b82f6","#a855f7","#14b8a6","#6366f1"];
-  document.getElementById("insToolsList").innerHTML = tls.slice(0, 10).map(function (x, i) {
+  patchHTML("insToolsList", tls.slice(0, 10).map(function (x, i) {
     return '<div class="barRow" title="耗时 ' + durMs(x.tool_ms) + (x.errors ? " · 失败 " + x.errors : "") + '">'
       + '<span class="nm">' + esc(x.name) + "</span>"
       + '<span class="tr"><i style="width:' + (x.calls / maxT * 100).toFixed(1) + "%;background:" + TOOL_COLORS[i % 6] + '"></i></span>'
       + '<span class="ct">×' + x.calls + "</span></div>";
-  }).join("") || '<span class="empty" style="padding:18px 0">无工具调用</span>';
+  }).join("") || '<span class="empty" style="padding:18px 0">无工具调用</span>');
   // 命令
   var cmds = d.commands || [];
   document.getElementById("insCmdsSub").textContent = cmds.length + " 个程序";
   var maxC = Math.max.apply(null, cmds.map(function (x) { return x.count; }).concat([1]));
   var CMD_COLORS = ["#e0aa14","#3ddc97","#e5735f","#8b5cf6","#3b82f6"];
-  document.getElementById("insCmdsList").innerHTML = cmds.slice(0, 10).map(function (x, i) {
+  patchHTML("insCmdsList", cmds.slice(0, 10).map(function (x, i) {
     return '<div class="barRow"><span class="nm">' + esc(x.program) + "</span>"
       + '<span class="tr"><i style="width:' + (x.count / maxC * 100).toFixed(1) + "%;background:" + CMD_COLORS[i % 5] + '"></i></span>'
       + '<span class="ct">×' + x.count + "</span></div>";
-  }).join("") || '<span class="empty" style="padding:18px 0">无命令记录</span>';
+  }).join("") || '<span class="empty" style="padding:18px 0">无命令记录</span>');
   document.getElementById("insSessCount").textContent = (d.sessions || []).length + " 个";
 }
 function dirName(s) {
@@ -1147,20 +1219,21 @@ function renderSessions() {
     if (key === "context") return (b.context || 0) - (a.context || 0);
     return (b.updated || 0) - (a.updated || 0);
   });
-  if (!list.length) { box.innerHTML = '<div class="empty">无匹配会话</div>'; return; }
-  box.innerHTML = list.slice(0, 60).map(function (s, i) {
+  if (!list.length) { patchHTML("insSessions", '<div class="empty">无匹配会话</div>'); return; }
+  var html = list.slice(0, 60).map(function (s, i) {
     var created = s.created ? new Date(s.created).toLocaleDateString("zh-CN") : "";
     var segs = [
       { v: Math.max((s.tokens || 0) - (s.output || 0), 0), c: "#3b82f6" },
       { v: s.output || 0, c: "#f59e0b" },
     ];
     var ctxPct = s.window ? Math.round((s.context || 0) / s.window * 1000) / 10 : null;
-    // dsh 会话卡：donut size 64，中心=Context 值 + 占比；右侧三行统计；底部最新消息
+    // dsh 会话卡：donut 中心只放 Context 数值（占比移入统计行，避免小环内双行拥挤）
     var body = '<div class="sBody">'
-      + donut(segs, cnum(s.context || s.tokens), ctxPct != null ? ctxPct + "%" : "上下文", 64)
+      + donut(segs, fmtK(s.context || s.tokens), null, 76)
       + '<div class="sStats">'
       + '<div class="sStat"><span class="k">轮次</span><span class="v">' + s.turns + " 轮 " + s.steps + " 步</span></div>"
       + '<div class="sStat"><span class="k">Token 总用量</span><span class="v">' + cnum(s.tokens) + "</span></div>"
+      + '<div class="sStat"><span class="k">Context 占比</span><span class="v">' + (ctxPct != null ? ctxPct + "%" : "—") + "</span></div>"
       + '<div class="sStat"><span class="k">窗口</span><span class="v">' + cnum(s.window || 0) + "</span></div>"
       + "</div></div>";
     return '<div class="sCard enter' + (s.id === state.sessionId ? " on" : "") + '" data-sid="' + esc(s.id) + '" style="--delay:' + Math.min(i * 30, 300) + 'ms">'
@@ -1171,6 +1244,7 @@ function renderSessions() {
       + '<div class="sPreview"><span class="k">最新消息</span><span class="v" title="' + esc(s.last_msg || "") + '">' + esc(s.last_msg || "—") + "</span></div>"
       + "</div>";
   }).join("");
+  if (patchHTML("insSessions", html)) animateSwap(document.getElementById("insSessions"));
   box.onclick = function (ev) {
     var c = ev.target.closest(".sCard[data-sid]");
     if (!c) return;
@@ -1225,25 +1299,29 @@ async function ensureContext() {
   if (!state.ctx || state.ctx.session.id !== state.sessionId) loadContext();
   else renderContext();
 }
-async function loadContext() {
-  showErr("ctxErr", null);
+async function loadContext(silent) {
+  if (!silent) showErr("ctxErr", null);
   try {
     state.ctx = await callTool("get_session_context", { session_id: state.sessionId });
-    state.trendSel = -1;
+    if (!silent) state.trendSel = -1; // 静默刷新保留用户点选的下钻步
+    if (state.ctx.session) state.lastActivity = Math.max(state.lastActivity, Number(state.ctx.session.updated || 0));
+    if (state.ctx.live && state.ctx.live.ts) state.lastActivity = Math.max(state.lastActivity, state.ctx.live.ts);
     renderContext();
-    loadBrowser();
+    if (!silent) loadBrowser();
   } catch (e) {
-    showErr("ctxErr", "上下文获取失败：" + e.message);
+    if (!silent) showErr("ctxErr", "上下文获取失败：" + e.message);
   }
 }
-async function loadBrowser() {
+async function loadBrowser(silent) {
   try {
     state.browser = await callTool("get_context_browser", { session_id: state.sessionId });
     renderBrowser();
     renderCurrent();
   } catch (e) {
-    state.browser = null;
-    document.getElementById("ctxBrowser").innerHTML = '<span class="empty">' + esc(e.message) + "</span>";
+    if (!silent) {
+      state.browser = null;
+      patchHTML("ctxBrowser", '<span class="empty">' + esc(e.message) + "</span>");
+    }
   }
 }
 function topChips(items, total, colorFn) {
@@ -1258,45 +1336,45 @@ function renderContext() {
   var d = state.ctx; if (!d) return;
   var s = d.session, t = s.timing || {}, st = d.stats || {};
   // Context Stats KPI
-  document.getElementById("ctxStats").innerHTML = [
+  patchHTML("ctxStats", [
     { v: s.turns, l: "轮次" }, { v: s.steps, l: "步数" },
     { v: st.skills != null ? st.skills : "—", l: "技能加载" }, { v: st.answers != null ? st.answers : "—", l: "回答" },
-  ].map(function (x) { return '<div class="csCell"><div class="v">' + x.v + '</div><div class="l">' + x.l + "</div></div>"; }).join("");
-  document.getElementById("ctxEvCounts").innerHTML = "Context Events&nbsp;&nbsp;"
+  ].map(function (x) { return '<div class="csCell"><div class="v">' + x.v + '</div><div class="l">' + x.l + "</div></div>"; }).join(""));
+  patchHTML("ctxEvCounts", "Context Events&nbsp;&nbsp;"
     + '<b class="inj">Inject ' + (st.injects || 0) + "</b> / "
     + '<b class="cmp">Compact ' + ((st.compacts || 0) + (st.overflows || 0)) + "</b> / "
-    + '<b class="prn">Prune 0</b>';
+    + '<b class="prn">Prune 0</b>');
   document.getElementById("ctxStatsSub").textContent = esc(s.title || s.id);
   // Input / Output 行
   document.getElementById("ctxIoN").textContent = st.user_msgs != null ? st.user_msgs + " 条用户输入" : "—";
-  document.getElementById("ctxIoChips").innerHTML = topChips(
+  patchHTML("ctxIoChips", topChips(
     [{ name: "用户消息", count: st.user_msgs || 0 }, { name: "回答", count: st.answers || 0 }],
-    (st.user_msgs || 0) + (st.answers || 0), function (i) { return ["#22c55e", "#3b82f6"][i % 2]; });
+    (st.user_msgs || 0) + (st.answers || 0), function (i) { return ["#22c55e", "#3b82f6"][i % 2]; }));
   // Tool Calls
   document.getElementById("ctxToolN").textContent = st.tool_calls || 0;
   var toolAgg = (st.tools || []).slice(0, 8).map(function (x) { return { name: x.name, count: x.count }; });
-  document.getElementById("ctxToolChips").innerHTML = topChips(toolAgg, st.tool_calls || 0, function (i) {
+  patchHTML("ctxToolChips", topChips(toolAgg, st.tool_calls || 0, function (i) {
     return ["#f59e0b", "#22c55e", "#3b82f6", "#a855f7", "#14b8a6", "#6366f1"][i % 6];
-  });
+  }));
   // Command Executions
   var cmdTotal = (st.commands || []).reduce(function (a, x) { return a + x.count; }, 0);
   document.getElementById("ctxCmdN").textContent = cmdTotal;
-  document.getElementById("ctxCmdChips").innerHTML = topChips(st.commands || [], cmdTotal, function (i) {
+  patchHTML("ctxCmdChips", topChips(st.commands || [], cmdTotal, function (i) {
     return ["#e0aa14", "#3ddc97", "#e5735f", "#8b5cf6", "#3b82f6"][i % 5];
-  });
+  }));
   // Agent 家族行
   document.getElementById("ctxFleetN").textContent = "—";
-  document.getElementById("ctxFleetRows").innerHTML = '<span class="mchip"><i style="background:#3b82f6"></i>会话 <b>' + cnum(s.tokens || 0) + "</b> tok</span>"
-    + '<span class="mchip"><i style="background:#14b8a6"></i>输出 ' + cnum((s.token_sums || {}).output || 0) + "</span>";
+  patchHTML("ctxFleetRows", '<span class="mchip"><i style="background:#3b82f6"></i>会话 <b>' + cnum(s.tokens || 0) + "</b> tok</span>"
+    + '<span class="mchip"><i style="background:#14b8a6"></i>输出 ' + cnum((s.token_sums || {}).output || 0) + "</span>");
   // 会话信息卡
-  document.getElementById("ctxInfo").innerHTML = [
+  patchHTML("ctxInfo", [
     ["会话 ID", s.id], ["目录", s.directory], ["模型", s.model || "—"],
     ["窗口", cnum(s.window) + " tokens"],
     ["预估费用", s.cost != null ? "≈¥" + (Math.round(s.cost * 100) / 100) : "未配置 prices"],
     ["创建", s.created ? new Date(s.created).toLocaleString("zh-CN") : "—"],
     ["更新", s.updated ? new Date(s.updated).toLocaleString("zh-CN") : "—"],
     ["归档", s.archived ? "是" : "否"],
-  ].map(function (r) { return '<div class="row"><span class="k">' + r[0] + '</span><span class="v" title="' + esc(r[1]) + '">' + esc(r[1]) + "</span></div>"; }).join("");
+  ].map(function (r) { return '<div class="row"><span class="k">' + r[0] + '</span><span class="v" title="' + esc(r[1]) + '">' + esc(r[1]) + "</span></div>"; }).join(""));
   // Token 统计环形
   var ts = s.token_sums || {};
   document.getElementById("ctxCacheSub").textContent = "缓存命中 " + (t.cache_hit || 0) + "%";
@@ -1307,14 +1385,14 @@ function renderContext() {
     { n: "输出", v: ts.output, c: "#f59e0b" },
   ].filter(function (x) { return x.v > 0; });
   var tTotal = tSegs.reduce(function (a, x) { return a + x.v; }, 0) || 1;
-  document.getElementById("ctxTokensBody").innerHTML = donutLegendBlock(tSegs, cnum(tTotal), "Token 总量", 118);
+  patchHTML("ctxTokensBody", donutLegendBlock(tSegs, cnum(tTotal), "Token 总量", 118));
   document.getElementById("ctxTpsSub").textContent = "输出速度 " + (t.tps || 0) + " tok/s";
   var timSegs = [
     { n: "首字等待 (TTFT)", v: t.ttft_ms, c: "#6366f1" },
     { n: "模型生成", v: t.gen_ms, c: "#3b82f6" },
     { n: "工具执行", v: t.tool_ms, c: "#14b8a6" },
   ].filter(function (x) { return x.v > 0; });
-  document.getElementById("ctxTimingBody").innerHTML = donutLegendBlock(timSegs, durMs(t.active_ms), "活跃时长", 118);
+  patchHTML("ctxTimingBody", donutLegendBlock(timSegs, durMs(t.active_ms), "活跃时长", 118));
   renderCurrent();
   renderTrend();
   renderEvents();
@@ -1349,14 +1427,18 @@ function renderCurrent() {
     return '<i style="width:' + (c.tokens / win * 100).toFixed(2) + "%;background:" + (CAT_COLORS[c.key] || "#888") + '" title="' + esc(c.label) + " ≈" + cnum(c.tokens) + " (" + c.pct + '%)"></i>';
   }).join("");
   var reserve = Math.max(100 - used / win * 100, 0);
-  document.getElementById("ctxCurBar").innerHTML = segs + '<i class="reserve" style="width:' + reserve.toFixed(2) + '%"></i>';
-  document.getElementById("ctxCurLegend").innerHTML = cats.map(function (c) {
+  patchHTML("ctxCurBar", segs + '<i class="reserve" style="width:' + reserve.toFixed(2) + '%"></i>');
+  patchHTML("ctxCurLegend", cats.map(function (c) {
     return '<span class="cl"><i style="background:' + (CAT_HEX[c.key] || "#888") + '"></i>' + esc(c.label) + " <b>≈" + cnum(c.tokens) + "</b> <span>" + c.pct + "%</span></span>";
-  }).join("");
+  }).join(""));
 }
 function renderTrend() {
   var d = state.ctx; if (!d || !d.steps || !d.steps.length) return;
   var steps = d.steps.slice(-140);
+  // 签名防重画：数据/模式/下钻没变就不动 DOM（实时刷新不闪、不丢 hover）
+  var sig = steps.length + ":" + (steps[steps.length - 1].ts || 0) + ":" + state.trendMode + ":" + state.trendSel;
+  if (renderTrend._sig === sig) return;
+  renderTrend._sig = sig;
   var W = 620, H = 200, padL = 48, padR = 48, padT = 20, padB = 8;
   var iw = W - padL - padR, ih = H - padT - padB;
   var mode = state.trendMode;
@@ -1462,14 +1544,13 @@ function renderEvents() {
   document.getElementById("ctxEvSub").textContent = evs.length + " 条";
   var ICONS = { compact: "⇩", overflow: "⚠", switch: "⇄", error: "!", cancel: "⊘", spawn: "+" };
   var TY = { compact: "compact", overflow: "compact", switch: "switch", error: "error", cancel: "", spawn: "inject" };
-  document.getElementById("ctxEvents").innerHTML = evs.slice(-80).reverse().map(function (e) {
+  patchHTML("ctxEvents", evs.slice(-80).reverse().map(function (e) {
     return '<div class="evRow"><span class="ic">' + (ICONS[e.type] || "·") + '</span><span class="ty ' + (TY[e.type] || "") + '">' + esc(e.label) + "</span>"
       + '<span class="ds">' + esc(e.detail || "") + '</span><span class="tm">' + agoTs(e.ts) + "</span></div>";
-  }).join("") || '<span class="empty">该会话暂无上下文事件</span>';
+  }).join("") || '<span class="empty">该会话暂无上下文事件</span>');
 }
 function renderBrowser() {
   var b = state.browser; if (!b) return;
-  var box = document.getElementById("ctxBrowser");
   if (state.dna === "dna") {
     var rows = [];
     b.cats.forEach(function (c) {
@@ -1477,14 +1558,14 @@ function renderBrowser() {
     });
     var totalChars = rows.reduce(function (a, r) { return a + r.it.chars; }, 0) || 1;
     var scale = (b.actual_input || 0) > 0 ? b.actual_input / (totalChars / 4) : 1;
-    box.innerHTML = '<div class="dnaList">' + rows.slice(0, 300).map(function (r, ix) {
+    patchHTML("ctxBrowser", '<div class="dnaList">' + rows.slice(0, 300).map(function (r, ix) {
       var tk = Math.round(r.it.chars / 4 * scale) + r.it.images * 800;
       return '<div class="dnaRow"><span class="ix">' + (ix + 1) + '</span><i class="cd" style="background:' + (CAT_HEX[r.c.key] || "#888") + '"></i>'
         + '<span class="nm" title="' + esc(r.it.preview) + '"><b>' + esc(r.c.label) + "</b> · " + esc(r.it.title) + '</span><span class="tk">≈' + cnum(tk) + "</span></div>";
-    }).join("") + (rows.length > 300 ? '<div class="empty">…其余 ' + (rows.length - 300) + " 条已省略</div>" : "") + "</div>";
+    }).join("") + (rows.length > 300 ? '<div class="empty">…其余 ' + (rows.length - 300) + " 条已省略</div>" : "") + "</div>");
     return;
   }
-  box.innerHTML = '<div class="brCats">' + b.cats.map(function (c, ci) {
+  patchHTML("ctxBrowser", '<div class="brCats">' + b.cats.map(function (c, ci) {
     var open = c.items.length > 0 && c.items.length <= 60 && (c.key === "system_prompt" || c.key === "user_messages");
     return '<div class="brCat' + (open ? " open" : "") + '" data-ci="' + ci + '">'
       + '<div class="brCatHead"><span class="cv">▶</span><i class="cd" style="background:' + (CAT_HEX[c.key] || "#888") + '"></i>'
@@ -1494,21 +1575,23 @@ function renderBrowser() {
         return '<div class="brItem"><span class="nm" title="' + esc(it.preview) + '"><b>' + esc(it.title) + "</b></span>"
           + '<span class="pv">' + esc(it.preview.slice(0, 80)) + '</span><span class="tk">' + cnum(it.chars) + " 字符</span></div>";
       }).join("") + (c.items.length > 80 ? '<div class="empty">…其余 ' + (c.items.length - 80) + " 条</div>" : "") + "</div></div>";
-  }).join("") + "</div>";
-  box.querySelectorAll(".brCatHead").forEach(function (h) {
+  }).join("") + "</div>");
+  document.getElementById("ctxBrowser").querySelectorAll(".brCatHead").forEach(function (h) {
     h.addEventListener("click", function () { h.parentElement.classList.toggle("open"); });
   });
 }
 
 /* ---------- Agent 页 ---------- */
 function hash(s) { var h = 0; for (var i = 0; i < String(s).length; i++) h = (h * 31 + String(s).charCodeAt(i)) | 0; return h; }
-async function ensureFleet() {
-  showErr("fleetErr", null);
+async function ensureFleet(silent) {
+  if (!silent) showErr("fleetErr", null);
   try {
     state.fleet = await callTool("get_fleet", state.sessionId ? { session_id: state.sessionId } : {});
+    state.fleetAt = Date.now();
+    if (state.fleet.lead) state.lastActivity = Math.max(state.lastActivity, Number(state.fleet.lead.updated || 0));
     renderFleet();
   } catch (e) {
-    showErr("fleetErr", "Fleet 获取失败：" + e.message);
+    if (!silent) showErr("fleetErr", "Fleet 获取失败：" + e.message);
   }
 }
 function agentCard(a, role) {
@@ -1534,20 +1617,19 @@ function fleetRow(a, role) {
 function renderFleet() {
   var f = state.fleet; if (!f) return;
   var sm = f.summary || {};
-  document.getElementById("fleetStats").innerHTML = [
+  patchHTML("fleetStats", [
     { v: sm.agents || 1, l: "Agents" }, { v: sm.running || 0, l: "Running" },
     { v: sm.work_items || 0, l: "Work items" }, { v: sm.messages || 0, l: "Messages" },
-  ].map(function (x) { return '<div class="st"><div class="v">' + x.v + '</div><div class="l">' + x.l + "</div></div>"; }).join("");
-  var grid = document.getElementById("fleetGrid");
+  ].map(function (x) { return '<div class="st"><div class="v">' + x.v + '</div><div class="l">' + x.l + "</div></div>"; }).join(""));
   var html = f.lead ? agentCard(f.lead, "lead") : "";
   (f.members || []).forEach(function (m) { html += agentCard(m, "member"); });
-  grid.innerHTML = html || '<span class="empty">无会话</span>';
+  patchHTML("fleetGrid", html || '<span class="empty">无会话</span>');
   document.getElementById("fleetNetSub").textContent = (f.members || []).length + " 个子代理 · " + (f.lead ? cnum(f.lead.tokens) + " tok（主会话）" : "");
   var ms2 = f.members || [];
   document.getElementById("fleetSub").textContent = ms2.length + " 个";
-  document.getElementById("fleetMembers").innerHTML = ms2.length
+  patchHTML("fleetMembers", ms2.length
     ? ms2.map(function (m) { return fleetRow(m, "member"); }).join("")
-    : '<span class="empty">该会话没有派生子代理（ZCode 子代理会话会出现在这里）</span>';
+    : '<span class="empty">该会话没有派生子代理（ZCode 子代理会话会出现在这里）</span>');
 }
 
 /* ---------- 刷新 ---------- */
@@ -1609,10 +1691,19 @@ function renderDetail() {
     var h = Math.max(2, Math.round(v / max * 84));
     var peak = (sec.periodTypes || [])[i] === "PEAK";
     var t = (sec.xTime || [])[i] || "";
-    return '<div class="' + (peak ? "peak" : "") + '" style="height:' + h + 'px" title="' + esc(t.slice(5, 16)) + " · " + fmtK(v) + ' token' + (peak ? " · 峰时" : " · 谷时") + '"></div>';
+    return '<div class="' + (peak ? "peak" : "") + '" data-h="' + h + '" style="height:2px" title="' + esc(t.slice(5, 16)) + " · " + fmtK(v) + ' token' + (peak ? " · 峰时" : " · 谷时") + '"></div>';
   }).join("");
   var barsEl = document.getElementById("dBars");
-  if (barsEl.dataset.sig !== sec.totals.join(",")) { barsEl.dataset.sig = sec.totals.join(","); barsEl.innerHTML = bars; }
+  if (barsEl.dataset.sig !== sec.totals.join(",")) {
+    barsEl.dataset.sig = sec.totals.join(",");
+    barsEl.innerHTML = bars;
+    // 增长动画：先 2px 落位，下一帧长到目标高度
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        barsEl.querySelectorAll("div[data-h]").forEach(function (el) { el.style.height = el.dataset.h + "px"; });
+      });
+    });
+  }
   document.getElementById("dT0").textContent = ((sec.xTime || [])[0] || "").slice(5, 10);
   document.getElementById("dT1").textContent = ((sec.xTime || []).slice(-1)[0] || "").slice(5, 10);
   document.getElementById("dGran").textContent = "按" + (sec.granularity === "HOUR" ? "小时" : sec.granularity);
@@ -1624,6 +1715,7 @@ function renderDetail() {
   }).join("");
   var itemsEl = document.getElementById("dItems");
   if (itemsEl.dataset.sig !== items) { itemsEl.dataset.sig = items; itemsEl.innerHTML = items; }
+  animateSwap(document.getElementById("detailCard"));
 }
 async function loadDetail() {
   try {
@@ -1674,8 +1766,8 @@ function speedChart(d) {
   if ((n - 1) % every !== 0) {
     svg += '<text x="' + (W - padR) + '" y="' + (plotB + 24) + '" text-anchor="end" style="font:11px var(--mono)" fill="var(--dim)">' + ((d.xTime || [])[n - 1] || "").slice(5, 10) + '</text>';
   }
-  svg += '<path d="' + pathOf(d.proMax || []) + '" fill="none" stroke="#4082F5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
-    + '<path d="' + pathOf(d.lite || []) + '" fill="none" stroke="#FF8E42" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>';
+  svg += '<path d="' + pathOf(d.proMax || []) + '" fill="none" stroke="#4082F5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1" class="drawLine"/>'
+    + '<path d="' + pathOf(d.lite || []) + '" fill="none" stroke="#FF8E42" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1" class="drawLine"/>';
   return '<svg class="hSpeed" viewBox="0 0 ' + W + " " + H + '" style="width:100%;height:auto;display:block">' + svg + "</svg>";
 }
 function ensureHealthSkeleton(body) {
@@ -1696,7 +1788,14 @@ function renderHealth() {
   if (speed.dataset.sig !== sigS) {
     speed.dataset.sig = sigS;
     speed.innerHTML = speedChart(d);
+    // 描线动画：下一帧把 dashoffset 放到 0，折线从左向右画出
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        speed.querySelectorAll("path.drawLine").forEach(function (el) { el.style.strokeDashoffset = "0"; });
+      });
+    });
   }
+  animateSwap(document.getElementById("healthCard"));
 }
 async function loadHealth() {
   try {
