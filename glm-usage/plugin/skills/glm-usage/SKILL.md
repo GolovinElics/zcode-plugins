@@ -15,13 +15,15 @@ description: "Use when the user wants to check their Zhipu GLM plan (Coding Plan
 - **应用内面板**：调用 `open_dashboard` MCP 工具（也有 `/glm-usage:open` 命令）。面板四个标签：
   - **用量**：5h/周额度仪表、燃烧速率、触顶预测、Start Plan 桶
   - **洞察**：KPI、逐日用量、Token/耗时环形图、活跃度热力图、文件活动、工具/命令排行、会话卡片
-  - **上下文**：单会话的 Context Stats、Current Context（七类构成）、Context Browser（分类/DNA 模式）、Context Trend、Context Events
+  - **上下文**：单会话的 Context Stats、Current Context（七类构成）、Context Browser（分类/DNA/矩形图）、Context Trend、Context Events
   - **Agent**：Agent 家族（主会话 + 子代理）的上下文占用
 - **对话里直接看数字**：
   - `get_usage`：套餐用量文本摘要
   - `get_insights`（可带 range: today/7d/30d/all）：本地会话聚合统计
   - `get_session_context`：单会话深览（步级趋势、事件、Live 构成）
   - `get_context_browser`：某次模型请求的完整上下文七类分解
+  - `get_context_item`：读取最新或上一请求中指定条目的内容（最多 32,000 字符）
+  - `get_activity`：只读查询工具、命令和文件活动记录（最多 500 条，不执行命令）
   - `get_fleet`：Agent 家族视图
 
 ## 鉴权与数据说明
