@@ -1641,8 +1641,7 @@ function schedule(){
     if (el) el.textContent = Math.max(tick,0) + " 秒后刷新";
     if (tick <= 0) {
       tick = REFRESH;
-      if (state.tab === "usage") load();
-      else if (state.tab === "insights" && Date.now() - state.insightsAt > 60000) loadInsights();
+      if (state.tab === "usage") load(); // 洞察/上下文/Agent 由 live 定时器按会话活跃度驱动
     }
   }, 1000);
 }
