@@ -409,14 +409,14 @@ function renderInsights() {
     { n: "新输入", v: Math.max(k.input - k.cache_read - k.cache_write, 0), c: "#3b82f6" },
     { n: "输出", v: k.output, c: "#f59e0b" },
   ].filter(function (x) { return x.v > 0; });
-  patchHTML("insTokensBody", donutLegendBlock(tokSegs, cnum(k.tokens), "总用量", 118));
+  patchHTML("insTokensBody", donutLegendBlock(tokSegs, cnum(k.tokens), "总用量", 108));
   document.getElementById("insTpsSub").textContent = "输出速度 " + k.tps + " tok/s";
   var timSegs = [
     { n: "首字等待 (TTFT)", v: k.ttft_ms, c: "#6366f1" },
     { n: "模型生成", v: Math.max(k.model_ms - k.ttft_ms, 0), c: "#3b82f6" },
     { n: "工具执行", v: k.tool_ms, c: "#14b8a6" },
   ].filter(function (s) { return s.v > 0; });
-  patchHTML("insTimingBody", donutLegendBlock(timSegs, durMs(k.active_ms), "活跃时长", 118, true));
+  patchHTML("insTimingBody", donutLegendBlock(timSegs, durMs(k.active_ms), "活跃时长", 108, true));
   renderHeatmap(d);
   // 文件活动
   var files = d.files || [];
@@ -576,14 +576,14 @@ function renderContext() {
     { n: "输出", v: ts.output, c: "#f59e0b" },
   ].filter(function (x) { return x.v > 0; });
   var tTotal = tSegs.reduce(function (a, x) { return a + x.v; }, 0) || 1;
-  patchHTML("ctxTokensBody", donutLegendBlock(tSegs, cnum(tTotal), "Token 总量", 118));
+  patchHTML("ctxTokensBody", donutLegendBlock(tSegs, cnum(tTotal), "Token 总量", 108));
   document.getElementById("ctxTpsSub").textContent = "输出速度 " + (t.tps || 0) + " tok/s";
   var timSegs = [
     { n: "首字等待 (TTFT)", v: t.ttft_ms, c: "#6366f1" },
     { n: "模型生成", v: t.gen_ms, c: "#3b82f6" },
     { n: "工具执行", v: t.tool_ms, c: "#14b8a6" },
   ].filter(function (x) { return x.v > 0; });
-  patchHTML("ctxTimingBody", donutLegendBlock(timSegs, durMs(t.active_ms), "活跃时长", 118, true));
+  patchHTML("ctxTimingBody", donutLegendBlock(timSegs, durMs(t.active_ms), "活跃时长", 108, true));
   renderCurrent();
   renderTrend();
   renderEvents();

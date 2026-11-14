@@ -838,3 +838,85 @@ dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self
   #tab-agent .fleetBanner .stats { width:100%; justify-content:space-between; }
   #tab-agent .fleetBanner .st { min-width:0; flex:1; padding:6px; }
 }
+
+/* Shared density for the insight and context workspaces. */
+.densePage { container-type:inline-size; container-name:insight-page; }
+.densePage .card { padding:10px 12px; }
+.densePage .lc-title { margin-bottom:8px; gap:6px 8px; }
+.densePage .lc-title .t { font-size:12.5px; }
+.densePage .lc-title .s { font-size:10.5px; }
+.densePage .ovHead, .densePage .ctxHead { margin-bottom:10px; gap:8px; }
+.densePage .ovHead .t { font-size:17px; }
+.densePage :is(.ovTop,.ovMid,.ovQuad,.ctxTop) { gap:10px; margin-bottom:10px; }
+.densePage .ovTop { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.densePage .kpiGrid { gap:6px; }
+.densePage .kpi { padding:8px 10px; text-align:left; }
+.densePage .kpi .kv { font-size:21px; line-height:1.3; }
+.densePage .kpi .ks { font-size:10.5px; line-height:1.5; }
+.densePage .dailyChart { height:144px; padding-top:4px; }
+.densePage .dailyAxis { font-size:9.5px; }
+.densePage .dailyChart .col .lb { font-size:9.5px; }
+.densePage .chartLegend { margin-top:5px; gap:4px 10px; }
+.densePage :is(.ovMid,.ctxTop) > .card { min-height:0; }
+.densePage .donutWrap { gap:10px; }
+.densePage .donutWrap .lc-donut { transform:none; margin:0; }
+.densePage .legendGrid { gap:4px 10px; grid-template-columns:repeat(2,minmax(0,1fr)); }
+.densePage .lgRow { padding:3px 4px; }
+.densePage .lgRow .n, .densePage .lgRow .p { font-size:11px; }
+.densePage .ovQuad { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.densePage :is(.barList,.fileList) { gap:3px; max-height:216px; overflow-y:auto; overscroll-behavior:contain; }
+.densePage :is(.barRow,.fileRow) { min-height:26px; padding:3px 4px; }
+.densePage .heat { margin:6px auto; }
+.densePage .heatScale { margin-top:6px; }
+.densePage .sessGrid { gap:8px; grid-template-columns:repeat(3,minmax(0,1fr)); }
+.densePage .sCard { padding:9px 10px; gap:5px; }
+.densePage .sTitle { font-size:12px; }
+.densePage :is(.sessBar,.groupChips) { margin-bottom:8px; gap:6px; }
+.densePage .ctxTop { grid-template-columns:minmax(0,2.5fr) minmax(0,1fr); }
+.densePage .csCell { padding:6px 8px; }
+.densePage .csCell .v { font-size:17px; }
+.densePage .csEvents { margin-top:6px; }
+.densePage .csRows { gap:6px 12px; margin-top:8px; font-size:11px; }
+.densePage .csRow { margin-bottom:3px; padding-bottom:2px; }
+.densePage .chipRow { gap:3px 6px; margin-top:2px; }
+.densePage .infoCard .row { padding:2px 0; font-size:11px; }
+.densePage .ctxWorkspace { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+.densePage .browserPanel { min-height:0; }
+.densePage .bigCtx { margin-bottom:8px; }
+.densePage .bigCtx .n { font-size:21px; }
+.densePage .bigCtx .pct { font-size:13px; }
+.densePage .catLegend { margin-top:8px; gap:3px 10px; grid-template-columns:repeat(2,minmax(0,1fr)); }
+.densePage .estimateNote { margin-top:7px; }
+.densePage :is(.browserToolbar,.browserSearch,.dnaStrip) { margin-bottom:8px; }
+.densePage .brCatHead { padding:6px 8px; min-height:32px; }
+.densePage .brCat .brItems { max-height:260px; }
+.densePage .dnaList { max-height:440px; }
+.densePage .contextMap { min-height:300px; }
+.densePage :is(.brItem,.dnaRow) { padding:5px 6px; }
+.densePage .axisText { font-size:9px; }
+.densePage .trendHint { margin-top:5px; }
+.densePage .trendDetail { margin-top:8px; padding-top:8px; }
+.densePage .evList { max-height:240px; }
+.densePage .evRow { min-height:28px; padding:4px 6px; }
+.densePage .footer { padding-top:16px; }
+@container insight-page (max-width:1000px) {
+  .densePage .ovQuad, .densePage .sessGrid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .densePage .ctxTop { grid-template-columns:minmax(0,2fr) minmax(0,1fr); }
+  .densePage .legendGrid, .densePage .catLegend { grid-template-columns:minmax(0,1fr); }
+}
+@container insight-page (max-width:700px) {
+  .densePage :is(.ovTop,.ovMid,.ctxTop,.ctxWorkspace) { grid-template-columns:minmax(0,1fr); }
+  .densePage .browserPanel { position:static; }
+  .densePage .legendGrid, .densePage .catLegend { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@container insight-page (max-width:460px) {
+  .densePage .ovQuad, .densePage .sessGrid { grid-template-columns:minmax(0,1fr); }
+  .densePage .kpiGrid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .densePage .legendGrid { grid-template-columns:minmax(0,1fr); }
+  .densePage .lgRow { grid-template-columns:8px minmax(0,1fr) auto auto; column-gap:4px; }
+  .densePage .lgRow .v { grid-column:auto; font-size:10.5px; }
+  .densePage .lgRow .n { white-space:normal; }
+  .densePage .catLegend { grid-template-columns:minmax(0,1fr); }
+  .densePage .csRows { grid-template-columns:minmax(0,1fr); }
+  .densePage .stepMetrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
