@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
 import { panelResource } from '../plugin/mcp/panel-resource.mjs';
 import { fixtureCall } from './fixtures.mjs';
 import { mcpClient } from './mcp-client.mjs';
@@ -9,12 +10,14 @@ const readTools = new Set(['get_usage_json', 'get_config', 'get_usage', 'get_usa
 
 const port = Number(process.env.GLM_PREVIEW_PORT || 8792);
 const origin = `http://127.0.0.1:${port}`;
+const audit = process.env.GLM_PREVIEW_AUDIT === '1' ? readFileSync(new URL('./preview-audit.js', import.meta.url), 'utf8') : 'function auditStart(){} function auditEnd(){}';
 const shell = `<!doctype html><html><head><meta charset="utf-8"><title>GLM 插件交互预览</title><style>html,body{margin:0;height:100%;background:#141416}iframe{display:block;width:100%;height:calc(100% - 30px);border:0}header{height:30px;box-sizing:border-box;padding:5px 16px;font:12px system-ui;color:#aaa;background:#202023;display:flex;justify-content:space-between}a{color:#9cc4ff}</style></head><body><header><span>GLM 交互预览 · ${live ? 'ZCode 本地真实数据（只读）' : '演示数据'}</span><span>与 ZCode 相同的 MCP 面板资源</span></header><iframe id="panel" src="/panel" title="GLM 上下文洞察"></iframe><script>
 const frame=document.getElementById('panel');
+${audit}
 addEventListener('message',async e=>{if(e.source!==frame.contentWindow||e.origin!==location.origin)return;const d=e.data;if(d?.jsonrpc!=='2.0'||d.id==null)return;
 try{let result;if(d.method==='ui/initialize')result={protocolVersion:'2026-01-26',hostInfo:{name:'local-preview'},hostCapabilities:{serverTools:{}}};
-else if(d.method==='tools/call'){const r=await fetch('/rpc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d.params)});result=await r.json();if(!r.ok)throw Error(result.error);}
-else return;frame.contentWindow.postMessage({jsonrpc:'2.0',id:d.id,result},location.origin);}catch(e){frame.contentWindow.postMessage({jsonrpc:'2.0',id:d.id,error:{message:e.message}},location.origin);}});
+else if(d.method==='tools/call'){auditStart(d.id,d.params);const r=await fetch('/rpc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d.params)});result=await r.json();if(!r.ok)throw Error(result.error);}
+else return;frame.contentWindow.postMessage({jsonrpc:'2.0',id:d.id,result},location.origin);auditEnd(d.id);}catch(e){frame.contentWindow.postMessage({jsonrpc:'2.0',id:d.id,error:{message:e.message}},location.origin);}});
 </script></body></html>`;
 http.createServer(async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
