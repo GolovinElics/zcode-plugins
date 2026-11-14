@@ -27,6 +27,10 @@ test('real MCP transport: recent 600 steps, all-time totals, family, browser and
   for (let i = 0; i < 605; i++) insertStep.run(`step_${String(i).padStart(4, '0')}`, 'sess_root', now - (605 - i) * 1000, now, 'turn', 'glm-5', 'completed', 'chat', 100 + i, 10, 0, 50, 0, 110 + i, 1000, 100, null, 'stop', 0);
   db.prepare('INSERT INTO tool_usage VALUES(?,?,?,?,?,?,?,?,?,?)').run('tool1', 'sess_root', 'call1', 'bash', 'error', now, 6000, 1, 'process_exit', 100);
   db.prepare('INSERT INTO part VALUES(?,?,?,?,?,?)').run('p1', 'sess_root', 'm1', 0, now, JSON.stringify({ type: 'tool', callID: 'call1', tool: 'bash', state: { input: { command: 'node --test', run_in_background: true }, status: 'error' } }));
+  for (let i = 0; i < 13; i++) {
+    db.prepare('INSERT INTO tool_usage VALUES(?,?,?,?,?,?,?,?,?,?)').run(`extra${i}`, 'sess_root', `extra${i}`, 'bash', 'completed', now - i - 1, 10, 0, null, 0);
+    db.prepare('INSERT INTO part VALUES(?,?,?,?,?,?)').run(`p_extra${i}`, 'sess_root', 'm1', i + 1, now, JSON.stringify({ type: 'tool', callID: `extra${i}`, tool: 'bash', state: { input: { command: `program${i} --help` }, status: 'completed' } }));
+  }
   const io = { request: { body: { model: 'glm-5', messages: [{ role: 'user', content: 'Test context' }] } }, response: { usage: { prompt_tokens: 100, completion_tokens: 10 } }, completedAt: new Date(now).toISOString() };
   writeFileSync(join(root, 'cli/rollout/model-io-sess_root.jsonl'), JSON.stringify(io) + '\n');
   db.close();
@@ -37,6 +41,7 @@ test('real MCP transport: recent 600 steps, all-time totals, family, browser and
     assert.equal(context.steps.length, 600); assert.equal(context.session.steps, 605); assert.equal(context.steps_offset, 5);
     assert.equal(context.steps[0].id, 'step_0005'); assert.equal(context.steps.at(-1).id, 'step_0604');
     assert.equal(context.session.token_sums.input, 605 * 100 + 604 * 605 / 2);
+    assert.equal(context.stats.commands.length, 12); assert.equal(context.stats.command_calls, 14);
     const fleet = await client.call('get_fleet', { session_id: 'sess_child' });
     assert.equal(fleet.lead.id, 'sess_root'); assert.equal(fleet.summary.running, 2); assert.equal(fleet.lead.context, 704);
     const browser = await client.call('get_context_browser', { session_id: 'sess_root' });
@@ -48,7 +53,7 @@ test('real MCP transport: recent 600 steps, all-time totals, family, browser and
     await assert.rejects(client.call('get_context_item', { session_id: '../escape', item_id: item.id }), /无效/);
     await assert.rejects(client.call('get_context_item', { session_id: 'sess_root', item_id: 'stale' }), /更新/);
     const activity = await client.call('get_activity', { session_id: 'sess_root', kind: 'commands' });
-    assert.equal(activity.rows.length, 1); assert.equal(activity.rows[0].program, 'node'); assert(activity.rows[0].background);
+    assert.equal(activity.rows.length, 14); assert.equal(activity.rows[0].program, 'node'); assert(activity.rows[0].background);
     const insights = await client.call('get_insights', { range: '7d' });
     assert.equal(insights.kpis.steps, 605); assert.equal(insights.sessions[0].context, 704);
     assert(insights.daily[0].session_ids.includes('sess_root'));

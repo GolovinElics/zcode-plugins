@@ -540,8 +540,8 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible, summary:foc
 .estimateNote { color:var(--dim); font-size:10px; line-height:1.5; margin-top:10px; }
 .browserToolbar { display:flex; gap:8px; align-items:center; justify-content:space-between; margin:0 0 9px; flex-wrap:wrap; }
 .muted { color:var(--dim); font-size:11px; }
-.dnaStrip { height:15px; display:flex; gap:1px; overflow:hidden; border-radius:3px; background:var(--card2); margin-bottom:10px; }
-.dnaStrip button { padding:0; border:0; border-radius:0; min-width:1px; transition:opacity .16s,filter .16s; }
+.dnaStrip { height:15px; display:flex; gap:0; overflow:hidden; border-radius:3px; background:var(--card2); margin-bottom:10px; }
+.dnaStrip button { padding:0; border:0; border-radius:0; min-width:0; box-shadow:inset -.35px 0 var(--card); transition:opacity .16s,filter .16s; }
 .dnaStrip button.itemHot { filter:brightness(1.45); outline:2px solid var(--fg); outline-offset:-1px; }
 .browserSearch { display:flex; gap:5px; margin-bottom:10px; }
 .browserSearch input { width:100%; background:var(--bg2); padding:6px 9px; }
@@ -717,3 +717,5 @@ button.barRow:hover, button.fileRow:hover { background:var(--card2); }
 [data-theme="light"] .csCell:nth-child(3) .v { color:#7e22ce; }
 .brCat:not(.open) .brFold { visibility:hidden; transition:grid-template-rows .22s var(--ease),visibility 0s .22s; }
 .brCat.open .brFold { visibility:visible; transition:grid-template-rows .22s var(--ease); }
+
+dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self:center; flex:none; margin-top:8px; max-width:100%; }

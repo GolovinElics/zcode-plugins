@@ -78,11 +78,12 @@ function renderTrend() {
   if (renderTrend.signature === sig) { updateTrendPick(); return; }
   renderTrend.signature = sig;
   const offset = data.steps_offset || 0, deltaMode = state.trendMode === 'delta';
+  const deltas = calculateInputDeltas(steps);
   trendValues = steps.map((s, i) => ({ ...s, key: s.id || String(s.ts) + '-' + i, number: offset + i + 1,
     cr: s.cache_read, cw: s.cache_write, fi: Math.max(s.input - s.cache_read - s.cache_write, 0), ou: s.output,
-    delta: i ? s.input - steps[i - 1].input : null }));
+    delta: deltas[i] }));
   document.getElementById('trendCount').textContent = `${data.session.steps || steps.length} 步${offset ? ' · 展示最近 ' + steps.length + ' 步' : ''}`;
-  patchHTML('trendLegend', deltaMode ? '<span><i style="background:#3b82f6"></i>输入增长</span><span><i style="background:#e5735f"></i>输入减少</span><span>相对上一请求 · 首步无基线</span>' : '<span><i style="background:#22c55e"></i>缓存读</span><span><i style="background:#a855f7"></i>缓存写</span><span><i style="background:#3b82f6"></i>新输入</span><span><i style="background:#f59e0b"></i>输出</span><span>⌁ 耗时</span>');
+  patchHTML('trendLegend', deltaMode ? '<span><i style="background:#3b82f6"></i>输入增长</span><span><i style="background:#e5735f"></i>输入减少</span><span>相对上一有效请求 · 无上报值不计算</span>' : '<span><i style="background:#22c55e"></i>缓存读</span><span><i style="background:#a855f7"></i>缓存写</span><span><i style="background:#3b82f6"></i>新输入</span><span><i style="background:#f59e0b"></i>输出</span><span>⌁ 耗时</span>');
   const H = 190, top = 24, bottom = 158, plotH = bottom - top, slot = 17, left = 42, width = left + steps.length * slot + 42;
   const max = Math.max(1, ...trendValues.map(v => deltaMode ? Math.abs(v.delta || 0) : v.input + v.output));
   const maxDur = Math.max(1, ...steps.map(v => v.dur || 0));
@@ -136,14 +137,14 @@ function renderTrend() {
 function hoverTrend(group) {
   document.querySelectorAll('#ctxTrend .hovered').forEach(el => el.classList.remove('hovered')); group.classList.add('hovered');
   const v = trendValues[Number(group.dataset.index)];
-  showTip(group, `第 ${v.number} 步 · ${v.model}\n${new Date(v.ts).toLocaleString('zh-CN')}\n输入 ${fmt(v.input)} · 输出 ${fmt(v.output)}\n缓存读 ${fmt(v.cr)} · 缓存写 ${fmt(v.cw)}\n耗时 ${durMs(v.dur)}${state.trendMode === 'delta' ? '\n输入变化 ' + (v.delta == null ? '无上一请求' : (v.delta > 0 ? '+' : '') + fmt(v.delta)) : ''}${v.status === 'error' ? '\n请求失败：' + (v.error || '未知错误') : ''}`);
+  showTip(group, `第 ${v.number} 步 · ${v.model}\n${new Date(v.ts).toLocaleString('zh-CN')}\n输入 ${fmt(v.input)} · 输出 ${fmt(v.output)}\n缓存读 ${fmt(v.cr)} · 缓存写 ${fmt(v.cw)}\n耗时 ${durMs(v.dur)}${state.trendMode === 'delta' ? '\n输入变化 ' + (v.delta == null ? (v.input > 0 ? '无上一有效请求' : '未报告输入') : (v.delta > 0 ? '+' : '') + fmt(v.delta)) : ''}${v.status === 'error' ? '\n请求失败：' + (v.error || '未知错误') : ''}`);
 }
 function pickTrend(key) { state.trendKey = state.trendKey === key ? null : key; updateTrendPick(); }
 function updateTrendPick() {
   document.querySelectorAll('#ctxTrend [data-step]').forEach(g => { g.classList.toggle('selected', g.dataset.step === state.trendKey); g.setAttribute('aria-pressed', String(g.dataset.step === state.trendKey)); });
   const v = trendValues.find(v => v.key === state.trendKey), el = document.getElementById('ctxTrendDetail'); el.hidden = !v;
   if (!v) return;
-  patchHTML('ctxTrendDetail', `<div class="hd"><b>第 ${v.number} 步</b><span class="tm">${new Date(v.ts).toLocaleString('zh-CN')}</span><button class="textButton" onclick="state.trendKey=null;updateTrendPick()">取消选择 ×</button></div><div class="stepMetrics"><span>输入 <b>${fmt(v.input)}</b></span><span>输出 <b>${fmt(v.output)}</b></span><span>缓存命中 <b>${v.input ? (v.cr / v.input * 100).toFixed(1) : '0'}%</b></span><span>耗时 <b>${durMs(v.dur)}</b></span></div><div class="stepNote">${esc(v.model)} · ${v.status === 'error' ? '请求失败：' + esc(v.error || '未知错误') : '请求已完成'}${v.delta != null ? ' · 输入变化 ' + (v.delta > 0 ? '+' : '') + fmt(v.delta) : ''}</div>`);
+  patchHTML('ctxTrendDetail', `<div class="hd"><b>第 ${v.number} 步</b><span class="tm">${new Date(v.ts).toLocaleString('zh-CN')}</span><button class="textButton" onclick="state.trendKey=null;updateTrendPick()">取消选择 ×</button></div><div class="stepMetrics"><span>输入 <b>${fmt(v.input)}</b></span><span>输出 <b>${fmt(v.output)}</b></span><span>缓存命中 <b>${v.input ? (v.cr / v.input * 100).toFixed(1) : '0'}%</b></span><span>耗时 <b>${durMs(v.dur)}</b></span></div><div class="stepNote">${esc(v.model)} · ${v.status === 'error' ? '请求失败：' + esc(v.error || '未知错误') : v.status === 'running' ? '请求执行中' : v.status === 'cancelled' ? '请求已取消' : '请求已完成'}${v.delta != null ? ' · 输入变化 ' + (v.delta > 0 ? '+' : '') + fmt(v.delta) : v.input > 0 ? '' : ' · 未报告输入，不计算增量'}</div>`);
 }
 function renderEvents() {
   const events = state.ctx?.events || [];

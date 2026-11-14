@@ -38,7 +38,7 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* 回退 CLI 
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PANEL_URI = "ui://glm-usage/panel.html";
-const VERSION = "2.5.0";
+const VERSION = "2.5.1";
 const APP_VERSION = "3.18.2";
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8791"; // 仅当用户自建网页版时提示用，不作为依赖
 
@@ -831,6 +831,8 @@ function fetchSessionContext(sessionId) {
     }
     commands = [...agg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([program, count]) => ({ program, count }));
   } catch { /* 降级 */ }
+  const commandCalls = Number(q(`SELECT COUNT(*) n FROM part WHERE session_id = ?
+    AND json_extract(data,'$.type')='tool' AND json_extract(data,'$.state.input.command') IS NOT NULL`, [sessionId])[0]?.n || 0);
   const userMsgs = q(`SELECT COUNT(*) n FROM message WHERE session_id = ? AND json_extract(data,'$.role')='user'
     AND COALESCE(json_extract(data,'$.metadata.visibility'),'') != 'model-only'
     AND COALESCE(json_extract(data,'$.metadata.runtimeMessage'),'') = ''`, [sessionId])[0]?.n || 0;
@@ -868,7 +870,7 @@ function fetchSessionContext(sessionId) {
       injects: Number(injectN || 0), compacts: events.filter((e) => e.type === "compact").length,
       overflows: events.filter((e) => e.type === "overflow").length,
       tool_calls: Number(tl.calls || 0), tools: toolRows,
-      commands,
+      commands, command_calls: commandCalls,
     },
     steps,
     steps_offset: Math.max(0, sum.steps - steps.length),
