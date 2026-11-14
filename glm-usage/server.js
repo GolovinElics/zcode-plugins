@@ -636,6 +636,15 @@ const server = http.createServer((req, res) => {
     }));
   }
   if (req.url === "/api/config" && req.method === "POST") {
+    // 写接口校验：Host 必须是本服务地址（挡 DNS 重绑定），Origin 若存在必须是本站（挡跨站提交）
+    const host = String(req.headers.host || "").toLowerCase();
+    const origin = req.headers.origin;
+    const hostOk = host === `127.0.0.1:${PORT}` || host === `localhost:${PORT}`;
+    const originOk = !origin || origin === `http://127.0.0.1:${PORT}` || origin === `http://localhost:${PORT}`;
+    if (!hostOk || !originOk) {
+      res.writeHead(403, { "Content-Type": "application/json; charset=utf-8" });
+      return res.end(JSON.stringify({ ok: false, error: "仅接受本机同源请求" }));
+    }
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {

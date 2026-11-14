@@ -15,7 +15,7 @@
 |---|---|
 | `server.js` | 零依赖 Node 看板服务（127.0.0.1:8791），LaunchAgent 常驻 |
 | `plugin/` | ZCode 插件（应用内面板 + 技能 + MCP 工具） |
-| `.claude-plugin/marketplace.json` | 本地插件市场清单 |
+| `marketplace.json` | 市场清单（zcode-plugins 仓库根级；本地开发树中为 `.claude-plugin/marketplace.json`） |
 | `open-dashboard.applescript` | 独立 App 窗口（Chrome --app 模式）源码 |
 | `config.example.json` | 配置样例（复制为 `config.json` 使用，含 Key 不入库） |
 

@@ -28,7 +28,7 @@ import { execFileSync } from "node:child_process";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PANEL_URI = "ui://glm-usage/panel.html";
-const VERSION = "1.4.1";
+const VERSION = "1.4.2";
 const APP_VERSION = "3.18.2";
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8791"; // 仅当用户自建网页版时提示用，不作为依赖
 
@@ -58,7 +58,10 @@ function configuredApiKey() {
   return String(process.env.GLM_CODING_PLAN_API_KEY || loadConfig().coding_plan_key || "").trim();
 }
 
-/* ---------- 凭据解密（与 zcode.cjs 的 enc:v1 方案一致） ---------- */
+/* ---------- 凭据解密 ----------
+ * ZCode 自身的 enc:v1 方案：密钥 = SHA256("zcode-credential-fallback:{platform}:{homedir}:{username}")。
+ * 逐字节复刻自官方 zcode.cjs，任何改动都会导致解密失败；强度由 ZCode 客户端设计决定。
+ * 仅在本进程内解密使用，令牌不落盘、不出网（出网仅白名单两个官方域名）。 */
 
 function legacyKeyCandidates() {
   const fallback = `zcode-credential-fallback:${os.platform()}:${HOME}:${os.userInfo().username}`;
@@ -91,7 +94,9 @@ function loadDeviceMid() {
   return JSON.parse(fs.readFileSync(TELEMETRY_FILE, "utf8")).deviceMid;
 }
 
-// 从 ZCode 内嵌浏览器的 Cookie 库读取 bigmodel.cn 登录令牌（macOS，明文存储；非 macOS 返回空）
+// 零配置兜底：读取"本机用户本人"在 ZCode 内嵌浏览器里的 bigmodel.cn 登录态（Cookie 库中该值为明文存储）。
+// 意图与 ZCode 桌面版自身一致（它同样从该库取此 Cookie 调用同族接口）；令牌仅在本机进程内用于请求
+// open.bigmodel.cn，不写日志、不外传。用户配置 API Key（set_coding_key）后本路径不会被调用。
 function loadCodingPlanToken() {
   if (process.platform !== "darwin") throw new Error("未找到网页登录令牌");
   const tmp = path.join(os.tmpdir(), `zcode-cookies-${process.pid}.db`);
@@ -305,7 +310,7 @@ const TOOLS = [
   },
   {
     name: "set_coding_key",
-    description: "Save the bigmodel.cn Coding Plan API key for this machine (stored in ~/.glm-usage/config.json, mode 600). Pass empty string to clear.",
+    description: "Save the bigmodel.cn Coding Plan API key for this machine (stored in ~/.glm-usage/config.json, mode 600). NOTE: tool arguments may persist in conversation history — for a human user, prefer the panel's settings input which bypasses the conversation. Pass empty string to clear.",
     inputSchema: { type: "object", properties: { key: { type: "string" } }, required: ["key"], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },

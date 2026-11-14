@@ -1,6 +1,6 @@
 {
   "name": "glm-usage",
-  "version": "1.3.3",
+  "version": "1.4.2",
   "skills": "./skills",
   "commands": "./commands",
   "description": "GLM Coding Plan usage dashboard: in-app panel plus local web UI with 5h/weekly quota gauges, burn rate, ETA and history sparkline.",
