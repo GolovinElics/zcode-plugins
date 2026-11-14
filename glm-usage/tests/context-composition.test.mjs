@@ -4,8 +4,17 @@ import { categorizeEntry } from '../plugin/mcp/context-composition.mjs';
 import { panelResource } from '../plugin/mcp/panel-resource.mjs';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
+import requestMetrics from '../plugin/request-metrics.js';
 
 const entry = (messages, usage = {}) => ({ request: { body: { messages } }, response: { usage } });
+test('missing request usage is not mistaken for context compression', () => {
+  const deltas = requestMetrics.calculateInputDeltas([
+    { input: 66430, status: 'completed' }, { input: 0, status: 'error' },
+    { input: 67000, status: 'completed' }, { input: 0, status: 'running' },
+    { input: 12000, status: 'completed' },
+  ]);
+  assert.deepEqual(deltas, [null, null, 570, null, -55000]);
+});
 test('GLM OpenAI format keeps system, tool calls, tool results and reasoning in sequence', () => {
   const data = categorizeEntry(entry([
     { role: 'system', content: 'Base prompt' },

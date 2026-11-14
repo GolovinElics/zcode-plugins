@@ -36,7 +36,10 @@ function setBusy(id, busy) {
 function reducedMotion() { return matchMedia('(prefers-reduced-motion: reduce)').matches; }
 function reveal(el) { el?.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'instant' : 'smooth' }); }
 function toast(message) {
-  const el = document.getElementById('toast'); el.textContent = message; el.hidden = false;
+  const el = document.getElementById('toast');
+  // Native <dialog> uses the top layer; a body-level toast is hidden behind it.
+  (document.querySelector('dialog[open]') || document.body).append(el);
+  el.textContent = message; el.hidden = false;
   clearTimeout(toast.timer); toast.timer = setTimeout(() => { el.hidden = true; }, 2600);
 }
 let tipAnchor = null, hoverElement = null, lastInput = 'pointer';

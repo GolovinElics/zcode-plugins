@@ -41,7 +41,8 @@ function renderBrowser() {
   const query = state.browserQuery;
   const filtered = rows.filter(r => (!query || `${r.it.title} ${r.it.preview} ${r.c.label} ${r.it.kind}`.toLowerCase().includes(query)) && (!state.catPick || r.c.key === state.catPick));
   document.getElementById('browserClear').hidden = !query;
-  document.getElementById('browserMeta').textContent = `${rows.length} 项 · ${b.estimated ? '估算' : '输入'} ${cnum(b.total || b.actual_input)} tok`;
+  const itemCount = b.cats.reduce((n, c) => n + (c.count ?? c.items.length), 0);
+  document.getElementById('browserMeta').textContent = `${rows.length < itemCount ? rows.length + '/' + itemCount + ' 项预览' : rows.length + ' 项'} · ${b.estimated ? '估算' : '输入'} ${cnum(b.total || b.actual_input)} tok`;
   const prevButton = document.querySelector('[data-snapshot="prev"]'); prevButton.disabled = !b.has_previous;
   document.querySelectorAll('[data-snapshot]').forEach(el => { el.classList.toggle('on', el.dataset.snapshot === state.snapshot); el.setAttribute('aria-pressed', String(el.dataset.snapshot === state.snapshot)); });
   document.querySelectorAll('#dnaMode button').forEach(el => el.setAttribute('aria-pressed', String(el.dataset.m === state.dna)));
@@ -50,7 +51,7 @@ function renderBrowser() {
     const cat = b.cats.find(c => c.key === state.catPick);
     patchHTML('browserSelection', `<span><i style="background:${CAT_HEX[state.catPick]}"></i>${esc(cat?.label || '')} · ${filtered.length} 项</span><button class="textButton" data-pick-cat="${state.catPick}">清除分类 ×</button>`);
   }
-  patchHTML('browserStrip', rows.slice(0, 600).map(r => `<button data-key="strip-${r.it.id}" data-item="${r.it.id}" data-cat="${r.c.key}" style="flex:${Math.max(1, r.it.tokens)};background:${CAT_HEX[r.c.key]}" data-tip="${esc(r.c.label)} · ${esc(r.it.title)}\n≈${fmt(r.it.tokens)} tokens" aria-label="${esc(r.it.title)}，约${fmt(r.it.tokens)} tokens"></button>`).join(''));
+  patchHTML('browserStrip', rows.map(r => `<button data-key="strip-${r.it.id}" data-item="${r.it.id}" data-cat="${r.c.key}" style="flex:${Math.max(1, r.it.tokens)};background:${CAT_HEX[r.c.key]}" data-tip="${esc(r.c.label)} · ${esc(r.it.title)}\n≈${fmt(r.it.tokens)} tokens" aria-label="${esc(r.it.title)}，约${fmt(r.it.tokens)} tokens"></button>`).join(''));
   let html = '';
   if (!filtered.length) html = '<div class="empty">没有匹配的上下文条目。可清除搜索或分类筛选。</div>';
   else if (state.dna === 'map') {
@@ -68,7 +69,7 @@ function renderBrowser() {
       if (query && !items.length) return '';
       const open = state.expanded.has(c.key) || !!query;
       const limit = state.rowLimits?.[c.key] || 80;
-      return `<section class="brCat ${open ? 'open' : ''}" data-cat-row="${c.key}" data-cat="${c.key}" style="--cat:${CAT_HEX[c.key]}"><button class="brCatHead" data-toggle-cat="${c.key}" aria-expanded="${open}" aria-controls="items-${c.key}"><span class="cv">›</span><i class="cd" style="background:var(--cat)"></i><span class="nm">${esc(c.label)} <span>${query ? items.length : c.count ?? c.items.length} 项${c.truncated ? '+' : ''}</span></span><span class="tk">≈${cnum(c.tokens)}</span><span class="pc">${c.pct}%</span></button><div class="brFold" ${open ? '' : 'inert'}><div><div class="brItems" id="items-${c.key}">${items.slice(0, limit).map(r => browserItem(r)).join('') || '<div class="empty">暂无此类内容</div>'}${open && items.length > limit ? `<button class="loadMore" data-more="${c.key}">再显示 ${Math.min(100, items.length - limit)} 项 · 共 ${items.length} 项</button>` : ''}${open && c.truncated ? '<div class="estimateNote">此分类最多返回 400 项预览，分类总量包含全部条目。</div>' : ''}</div></div></div></section>`;
+      return `<section class="brCat ${open ? 'open' : ''}" data-cat-row="${c.key}" data-cat="${c.key}" style="--cat:${CAT_HEX[c.key]}"><button class="brCatHead" data-toggle-cat="${c.key}" aria-expanded="${open}" aria-controls="items-${c.key}"><span class="cv">›</span><i class="cd" style="background:var(--cat)"></i><span class="nm">${esc(c.label)} <span>${query ? items.length : c.count ?? c.items.length} 项${c.truncated ? ' · 预览 ' + c.items.length : ''}</span></span><span class="tk">≈${cnum(c.tokens)}</span><span class="pc">${c.pct}%</span></button><div class="brFold" ${open ? '' : 'inert'}><div><div class="brItems" id="items-${c.key}">${items.slice(0, limit).map(r => browserItem(r)).join('') || '<div class="empty">暂无此类内容</div>'}${open && items.length > limit ? `<button class="loadMore" data-more="${c.key}">再显示 ${Math.min(100, items.length - limit)} 项 · 共 ${items.length} 项</button>` : ''}${open && c.truncated ? '<div class="estimateNote">此分类最多返回 400 项预览，分类总量包含全部条目。</div>' : ''}</div></div></div></section>`;
     }).join('') + '</div>';
   }
   patchHTML('ctxBrowser', html);

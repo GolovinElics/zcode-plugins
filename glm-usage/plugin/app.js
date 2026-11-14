@@ -543,7 +543,7 @@ function renderContext() {
     return ["#f59e0b", "#22c55e", "#3b82f6", "#a855f7", "#14b8a6", "#6366f1"][i % 6];
   }));
   // Command Executions
-  var cmdTotal = (st.commands || []).reduce(function (a, x) { return a + x.count; }, 0);
+  var cmdTotal = st.command_calls ?? (st.commands || []).reduce(function (a, x) { return a + x.count; }, 0);
   document.getElementById("ctxCmdN").textContent = cmdTotal;
   patchHTML("ctxCmdChips", topChips(st.commands || [], cmdTotal, function (i) {
     return ["#e0aa14", "#3ddc97", "#e5735f", "#8b5cf6", "#3b82f6"][i % 5];
