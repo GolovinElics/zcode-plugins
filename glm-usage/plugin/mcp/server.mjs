@@ -36,7 +36,7 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* 回退 CLI 
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PANEL_URI = "ui://glm-usage/panel.html";
-const VERSION = "2.0.1";
+const VERSION = "2.1.0";
 const APP_VERSION = "3.18.2";
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8791"; // 仅当用户自建网页版时提示用，不作为依赖
 
@@ -1117,6 +1117,12 @@ const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
+    name: "set_refresh",
+    description: "Set the usage auto-refresh interval in seconds (10-600). Persisted in ~/.glm-usage/config.json.",
+    inputSchema: { type: "object", properties: { seconds: { type: "number", description: "Refresh interval in seconds (10-600)" } }, required: ["seconds"], additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
+  {
     name: "get_config",
     description: "Read local glm-usage config (key masked, refresh/sample intervals, context windows, pricing).",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -1226,6 +1232,14 @@ async function handleToolCall(name, args) {
     else cfg.coding_plan_key = key;
     saveConfig(cfg);
     return { content: [{ type: "text", text: key ? "已保存 ✓（优先使用）" : "已清除（回退浏览器登录态）" }] };
+  }
+  if (name === "set_refresh") {
+    const n = Math.round(Number(args?.seconds));
+    if (!Number.isFinite(n) || n < 10 || n > 600) throw new Error("seconds 需在 10~600 之间");
+    const cfg = loadConfig();
+    cfg.refresh_seconds = n;
+    saveConfig(cfg);
+    return { content: [{ type: "text", text: `已设为每 ${n >= 60 ? (n / 60) + " 分钟" : n + " 秒"}刷新` }] };
   }
   if (name === "get_config") {
     const key = configuredApiKey();

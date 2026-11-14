@@ -5,3 +5,5 @@ history.json
 server.log
 *.log
 .DS_Store
+
+.mimosa/
