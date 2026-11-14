@@ -126,6 +126,18 @@
   .lineLegend { display:flex; gap:16px; font-size:12px; color:var(--fg); margin-top:4px; margin-bottom:10px; align-items:center; flex-wrap:wrap; }
   .lineLegend i { display:inline-block; width:8px; height:8px; border-radius:99px; margin-right:6px; }
   .sparkCap { display:flex; justify-content:space-between; font-size:10px; color:var(--faint); margin-top:3px; font-family:inherit; }
+  /* ===== 切换/刷新时的动态渲染 ===== */
+  .bars > div { transform-origin:bottom; animation:growY .5s var(--ease) backwards; }
+  @keyframes growY { from { transform:scaleY(0); } }
+  .item .ib > i { transform-origin:left; animation:growX .5s var(--ease) backwards; }
+  @keyframes growX { from { transform:scaleX(0); } }
+  .metric .mv { animation:fadeUp .35s var(--ease); }
+  @keyframes fadeUp { from { opacity:0; transform:translateY(4px); } }
+  .hSpeed path { stroke-dasharray:1; stroke-dashoffset:1; animation:drawLine 1s var(--ease) forwards; }
+  @keyframes drawLine { to { stroke-dashoffset:0; } }
+  .segArc { animation:arcIn .6s var(--ease) backwards; animation-delay:calc(var(--i,0) * 45ms); }
+  @keyframes arcIn { from { stroke-dasharray:0 100; } }
+  .dailyChart .col { transform-origin:bottom; animation:growY .5s var(--ease) backwards; animation-delay:calc(var(--i,0) * 18ms); }
   .tabs { display:flex; gap:4px; background:var(--card2); border:1px solid var(--bd); border-radius:10px; padding:3px; width:max-content; margin:10px 0 16px; }
   .tabs button { border:0; background:transparent; padding:4px 16px; border-radius:7px; color:var(--sub); font-size:12.5px; font-weight:550; }
   .tabs button:hover { color:var(--fg); }
@@ -718,8 +730,8 @@ function donut(segs, centerTop, centerSub, size) {
   if (!arcs.length) {
     svg += '<circle class="lc-donut-track" fill="none" stroke-width="4" cx="21" cy="21" r="15.9155"/>';
   } else {
-    arcs.forEach(function (a) {
-      svg += '<circle fill="none" stroke-width="4" cx="21" cy="21" r="15.9155" stroke="' + a.c + '"'
+    arcs.forEach(function (a, ai) {
+      svg += '<circle class="segArc" style="--i:' + ai + '" fill="none" stroke-width="4" cx="21" cy="21" r="15.9155" stroke="' + a.c + '"'
         + ' stroke-dasharray="' + a.len.toFixed(3) + ' ' + (100 - a.len).toFixed(3) + '"'
         + ' stroke-dashoffset="' + a.offset.toFixed(3) + '"/>';
     });
@@ -836,6 +848,14 @@ function patchSection(el, b, l1html, l2html, sparkHtml, sparkKey) {
   var pct = el.querySelector(".qPct"), reset = el.querySelector(".qReset"),
       bar = el.querySelector(".meter > i"), l1 = el.querySelector(".l1"),
       l2 = el.querySelector(".l2"), sb = el.querySelector(".sparkBox");
+  // 首次补丁：先渲染 0% 再放行过渡，让进度条有从零增长的首载动画（之后刷新为平滑过渡到新值）
+  if (el.dataset.mInit !== "1" && bar) {
+    el.dataset.mInit = "1";
+    bar.style.transition = "none";
+    bar.style.width = "0%";
+    void bar.offsetWidth;
+    bar.style.transition = "";
+  }
   pct.textContent = b.percent + "%";
   pct.style.color = lvColor(b.percent);
   reset.textContent = "重置 " + (b.reset_at ? until(b.reset_at, true) + "后" : "—");
@@ -1021,10 +1041,10 @@ function renderInsights() {
   var daily = d.daily || [];
   document.getElementById("insDailySub").textContent = daily.length + " 天 · " + cnum(k.tokens) + " tokens";
   var maxDay = Math.max.apply(null, daily.map(function (x) { return x.tokens; }).concat([1]));
-  document.getElementById("insDailyChart").innerHTML = daily.slice(-30).map(function (x) {
+  document.getElementById("insDailyChart").innerHTML = daily.slice(-30).map(function (x, i) {
     var h = function (v) { return Math.max(v / maxDay * 100, x.tokens ? 1.5 : 0); };
     var cr = x.cache_read || 0, fi = Math.max((x.input_t || 0) - cr, 0), ou = x.output_t || 0;
-    return '<div class="col" title="' + x.day + " · " + cnum(x.tokens) + " tok · " + x.steps + " 步 · " + x.sessions + " 会话"
+    return '<div class="col" style="--i:' + i + '" title="' + x.day + " · " + cnum(x.tokens) + " tok · " + x.steps + " 步 · " + x.sessions + " 会话"
       + "\n缓存读 " + cnum(cr) + " · 新输入 " + cnum(fi) + " · 输出 " + cnum(ou) + '">'
       + '<i style="height:' + h(ou) + '%;background:#f59e0b"></i>'
       + '<i style="height:' + h(fi) + '%;background:#3b82f6"></i>'
@@ -1574,10 +1594,17 @@ function renderDetail() {
   if (!sec || sec.error) return;
   var sm = sec.summary || {}, max = Math.max.apply(null, [1].concat(sec.totals || []));
   ensureDetailSkeleton(body);
-  document.getElementById("dTtl").textContent = fmtK(sm.total);
-  document.getElementById("dDly").textContent = fmtK(sm.daily);
-  document.getElementById("dCh").textContent = (sm.cacheHit * 100).toFixed(1) + "%";
-  document.getElementById("dPk").textContent = (sm.peakRate * 100).toFixed(0) + "%";
+  function setMetric(id, v) {
+    var el = document.getElementById(id);
+    if (el.textContent !== String(v)) {
+      el.textContent = v;
+      el.style.animation = "none"; void el.offsetWidth; el.style.animation = "";
+    }
+  }
+  setMetric("dTtl", fmtK(sm.total));
+  setMetric("dDly", fmtK(sm.daily));
+  setMetric("dCh", (sm.cacheHit * 100).toFixed(1) + "%");
+  setMetric("dPk", (sm.peakRate * 100).toFixed(0) + "%");
   var bars = (sec.totals || []).map(function (v, i) {
     var h = Math.max(2, Math.round(v / max * 84));
     var peak = (sec.periodTypes || [])[i] === "PEAK";
@@ -1649,7 +1676,7 @@ function speedChart(d) {
   }
   svg += '<path d="' + pathOf(d.proMax || []) + '" fill="none" stroke="#4082F5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
     + '<path d="' + pathOf(d.lite || []) + '" fill="none" stroke="#FF8E42" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>';
-  return '<svg viewBox="0 0 ' + W + " " + H + '" style="width:100%;height:auto;display:block">' + svg + "</svg>";
+  return '<svg class="hSpeed" viewBox="0 0 ' + W + " " + H + '" style="width:100%;height:auto;display:block">' + svg + "</svg>";
 }
 function ensureHealthSkeleton(body) {
   if (body.dataset.built === "1") return;
@@ -1712,6 +1739,10 @@ async function saveRefresh(v) {
     var r = await window.__bridgeCall("tools/call", { name: "set_refresh", arguments: { seconds: Number(v) } });
     REFRESH = Number(v); tick = REFRESH;
     if (timer) clearInterval(timer); schedule();
+    var n = Number(v);
+    document.getElementById("keystatus").textContent = r.content[0].text;
+    var sl = document.getElementById("subline");
+    if (sl) sl.innerHTML = "每 " + (n >= 60 ? (n / 60) + " 分钟" : n + " 秒") + "自动拉取 · 燃烧速率按最近 5 分钟～6 小时样本估算 · <a href=\"https://bigmodel.cn/coding-plan/personal/usage\" target=\"_blank\">官方用量页 ↗</a>";
   } catch (e) { document.getElementById("keystatus").textContent = "保存失败：" + e.message; }
 }
 async function saveKey(clear) {
