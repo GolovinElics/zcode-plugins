@@ -94,13 +94,19 @@ function highlightCategory(key = state.hoverCat || state.catPick, itemId = null)
 function selectSession(sid) {
   if (!sid) return;
   if (sid !== state.sessionId) {
+    saveContextView();
+    state.sessionTitle = state.sessions.find(s => s.id === sid)?.title || contextViews.get(sid)?.title || '';
     state.sessionId = sid; state.ctx = null; state.browser = null; state.fleet = null;
-    state.trendKey = null; state.trendSel = -1; state.catPick = null; state.hoverCat = null; state.snapshot = 'live';
-    state.expanded.clear(); state.browserQuery = ''; state.inspectorId = null;
-    state.rowLimits = {}; state.dnaLimit = 160; state.stripFocus = null; state.trendHover = null; state.agentPick = null; state.agentHover = null;
+    restoreContextView(sid);
+    state.hoverCat = null; state.inspectorId = null; state.trendHover = null; state.agentHover = null;
+    document.querySelectorAll('#tab-context [data-pinned]').forEach(el => { delete el.dataset.pinned; });
     requestTickets.context++; requestTickets.browser++; requestTickets.fleet++;
     inFlight.context = false; inFlight.browser = false; inFlight.fleet = false;
-    document.getElementById('browserSearch').value = '';
+    setBusy('browserPanel', true);
+    document.getElementById('ctxStatsSub').textContent = state.sessionTitle || '正在读取会话…';
+    for (const id of ['ctxIoN','ctxToolN','ctxCmdN','ctxEvCounts','ctxWinInfo','ctxCacheSub','ctxTpsSub','trendCount','ctxEvSub','ctxCurModel']) document.getElementById(id).textContent = '';
+    document.getElementById('browserMeta').textContent = '正在读取请求…';
+    document.getElementById('browserSearch').value = state.browserQuery;
     for (const id of ['ctxTokensBody', 'ctxTimingBody', 'ctxBrowser', 'ctxTrend', 'ctxEvents', 'ctxInfo', 'ctxStats']) {
       patchHTML(id, '<div class="loadingRows" role="status" aria-label="正在读取会话"><i></i><i></i><i></i></div>');
     }
@@ -125,12 +131,14 @@ function syncSelect(select) {
   const signature = JSON.stringify(visible.map(o => [o.value, o.textContent, o.selected]));
   if (ui.signature === signature) return;
   ui.signature = signature;
+  const focusedValue = ui.list.contains(document.activeElement) ? document.activeElement.dataset.value : null;
   ui.list.replaceChildren(...visible.map(o => {
     const button = document.createElement('button'); button.type = 'button'; button.role = 'option';
     button.textContent = o.textContent; button.dataset.value = o.value;
     button.setAttribute('aria-selected', String(o.selected));
     button.className = o.selected ? 'picked' : ''; return button;
   }));
+  if (focusedValue != null) [...ui.list.querySelectorAll('button')].find(b => b.dataset.value === focusedValue)?.focus();
   if (!visible.length) { const empty = document.createElement('div'); empty.className = 'selectEmpty'; empty.textContent = '无匹配项'; ui.list.append(empty); }
 }
 function enhanceSelect(select) {
@@ -317,4 +325,41 @@ function resetTransientHover() {
   hoverElement = null; state.hoverCat = null; state.trendHover = null; state.agentHover = null;
   document.querySelectorAll('.donutWrap').forEach(wrap => highlightDonut(wrap));
   highlightCategory(); highlightDay(null); updateTrendPick(); highlightAgent(); renderAgentInspector();
+}
+
+const contextViews = new Map();
+function saveContextView() {
+  if (!state.sessionId) return;
+  const pins = {...state.pendingContextPins};
+  for (const id of ['ctxTokensBody', 'ctxTimingBody']) {
+    const key = document.getElementById(id)?.querySelector('.donutWrap')?.dataset.pinned;
+    if (key != null) pins[id] = key;
+  }
+  const view = { title: state.sessionTitle, dna:state.dna, trendMode:state.trendMode,
+    snapshot:state.snapshot, catPick:state.catPick, browserQuery:state.browserQuery,
+    trendKey:state.trendKey, stripFocus:state.stripFocus, agentPick:state.agentPick,
+    dnaLimit:state.dnaLimit, rowLimits:{...state.rowLimits}, expanded:[...state.expanded], pins };
+  contextViews.delete(state.sessionId); contextViews.set(state.sessionId, view);
+  if (contextViews.size > 12) contextViews.delete(contextViews.keys().next().value);
+}
+function restoreContextView(sid) {
+  const saved = contextViews.get(sid);
+  Object.assign(state, { dna:'tree', trendMode:'total', snapshot:'live', catPick:null,
+    browserQuery:'', trendKey:null, stripFocus:null, agentPick:null, dnaLimit:160,
+    rowLimits:{}, expanded:[], pins:{}, ...saved });
+  state.expanded = new Set(state.expanded); state.rowLimits = {...state.rowLimits};
+  state.pendingContextPins = {...state.pins};
+  for (const [id,key] of [['dnaMode','dna'],['trendMode','trendMode']]) {
+    document.querySelectorAll('#' + id + ' [data-m]').forEach(el => el.classList.toggle('on',el.dataset.m===state[key]));
+  }
+}
+function restoreContextPins() {
+  if (!state.pendingContextPins) return;
+  for (const id of ['ctxTokensBody','ctxTimingBody']) {
+    const wrap = document.getElementById(id)?.querySelector('.donutWrap');
+    if (!wrap) continue;
+    if (state.pendingContextPins[id] != null) wrap.dataset.pinned = state.pendingContextPins[id];
+    highlightDonut(wrap);
+  }
+  state.pendingContextPins = null;
 }

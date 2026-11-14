@@ -92,3 +92,28 @@ test('fleet connectors follow horizontal and folded card geometry', () => {
     assert(rendered.includes(expected));assert(rendered.includes('data-edge="child"'));
   }
 });
+test('session return restores independent filters, pins and expansion without sharing mutable state', () => {
+  const wrap={dataset:{pinned:'缓存读取'}};
+  const r=runtime({querySelectorAll:()=>[],getElementById:()=>({querySelector:()=>wrap})});
+  Object.assign(r.state,{sessionId:'a',sessionTitle:'A',dna:'dna',trendMode:'delta',snapshot:'prev',catPick:'tool_results',browserQuery:'Bash',trendKey:'step-a',agentPick:'child-a',expanded:new Set(['tool_results']),rowLimits:{tool_results:160}});
+  r.saveContextView();r.restoreContextView('b');assert.equal(r.state.browserQuery,'');assert.equal(r.state.trendKey,null);
+  r.state.sessionId='b';r.state.browserQuery='Read';delete wrap.dataset.pinned;r.saveContextView();r.restoreContextView('a');
+  assert.equal(r.state.browserQuery,'Bash');assert.equal(r.state.trendKey,'step-a');assert.equal(r.state.pendingContextPins.ctxTokensBody,'缓存读取');
+  assert(r.state.expanded.has('tool_results'));r.state.expanded.add('assistant');r.state.rowLimits.tool_results=999;
+  r.restoreContextView('a');assert(!r.state.expanded.has('assistant'));assert.equal(r.state.rowLimits.tool_results,160);
+  r.restoreContextView('b');assert.equal(r.state.browserQuery,'Read');assert.equal(r.state.pendingContextPins.ctxTokensBody,undefined);
+});
+test('fleet data refresh patches members without clearing the separately maintained connectors', () => {
+  const elements=new Map();const r=runtime({querySelectorAll:()=>[],getElementById:id=>{if(!elements.has(id))elements.set(id,{});return elements.get(id);}});
+  r.requestAnimationFrame=()=>{};r.ResizeObserver=class {observe(){}};r.hash=()=>0;r.highlightAgent=()=>{};r.renderAgentInspector=()=>{};
+  const writes=[];r.patchHTML=(id,html)=>writes.push(id);r.state.fleet={lead:{id:'root'},members:[{id:'child',title:'Child'}]};
+  r.renderFleet();r.state.fleet.lead.context=42;r.renderFleet();
+  assert(writes.includes('fleetNodes'));assert(!writes.includes('fleetGrid'));assert(!writes.includes('agentEdges'));
+});
+test('rapid switches retain pending pins and the per-session view cache remains bounded', () => {
+  const r=runtime({querySelectorAll:()=>[],getElementById:()=>({querySelector:()=>null})});
+  Object.assign(r.state,{sessionId:'pending',browserQuery:'search',expanded:new Set(),rowLimits:{},pendingContextPins:{ctxTokensBody:'输出'}});
+  r.saveContextView();r.restoreContextView('pending');assert.equal(r.state.pendingContextPins.ctxTokensBody,'输出');
+  for(let i=0;i<13;i++){r.state.sessionId='session-'+i;r.saveContextView();}
+  r.restoreContextView('pending');assert.equal(r.state.browserQuery,'');assert.equal(r.state.pendingContextPins.ctxTokensBody,undefined);
+});

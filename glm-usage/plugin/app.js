@@ -101,7 +101,7 @@ function smoothPath(xy) {
   }
   return out;
 }
-function sparkline(pts, color) {
+function sparkline(pts, color, key) {
   if (!pts || pts.length < 2) return '<div class="sparkCap"><span>走势将随采样积累显示（本机定时记录已用量）</span></div>';
   var W = 224, H = 26, pad = 3, pp = downsample(pts, 90);
   var vs = pp.map(function(p){ return p[1]; });
@@ -111,8 +111,7 @@ function sparkline(pts, color) {
   var xy = pp.map(function(p){ return [pad + (p[0] - t0) / (t1 - t0) * (W - pad * 2), H - pad - (p[1] - v0) / (v1 - v0) * (H - pad * 2)]; });
   var line = monotonePath(xy);
   var area = line + " L" + (W - pad) + "," + (H - pad) + " L" + pad + "," + (H - pad) + " Z";
-  sparkline._n = (sparkline._n || 0) + 1;
-  var gid = "sg" + sparkline._n;
+  var gid = "sg" + Math.abs(hash(String(key || "usage")));
   return '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" style="width:100%;height:26px;display:block;overflow:hidden">'
     + '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="0" y2="1">'
     + '<stop offset="0" stop-color="' + color + '" stop-opacity=".22"/><stop offset="1" stop-color="' + color + '" stop-opacity="0"/>'
@@ -155,6 +154,7 @@ function patchSection(el, b, l1html, l2html, sparkHtml, sparkKey) {
     void bar.offsetWidth;
     bar.style.transition = "";
   }
+  el.querySelector(".qLabel").textContent = b.label || b.show_name || "";
   pct.textContent = b.percent + "%";
   pct.style.color = lvColor(b.percent);
   reset.hidden = !b.reset_at;
@@ -166,11 +166,14 @@ function patchSection(el, b, l1html, l2html, sparkHtml, sparkKey) {
     bar.classList.remove("sweep"); void bar.offsetWidth; bar.classList.add("sweep"); // 刷新扫光
   }
   bar.className = lvClass(b.percent) + (bar.classList.contains("sweep") ? " sweep" : "");
-  if (l1 && l1.innerHTML !== l1html) l1.innerHTML = l1html;
-  if (l2 && l2html && l2.innerHTML !== l2html) l2.innerHTML = l2html;
-  if (sb && built.spark[sparkKey] !== sparkHtml) { built.spark[sparkKey] = sparkHtml; sb.innerHTML = sparkHtml; }
+  if (l1) patchElement(l1, l1html);
+  if (l2) patchElement(l2, l2html || "");
+  if (sb && built.spark[sparkKey] !== sparkHtml) { built.spark[sparkKey] = sparkHtml; patchElement(sb, sparkHtml); }
 }
+var usageLoading = false;
 async function load() {
+  if (usageLoading) return;
+  usageLoading = true;
   var err = document.getElementById("err");
   err.style.display = "none";
   try {
@@ -201,18 +204,18 @@ async function load() {
         patchSection(wrap.children[i], b,
           "已用 <b>" + fmt(b.used) + "</b> / " + fmt(b.total) + '<span class="sep">·</span>剩余 <b>' + fmt(b.remaining) + "</b>",
           etaParts(b, rates[b.id]),
-          sparkline(hist[b.id], lvColor(b.percent)), b.id);
+          sparkline(hist[b.id], lvColor(b.percent), b.id), b.id);
       });
     } else if (cp && cp.error) {
       if (built.heroErr !== cp.error) {
         built.hero = false; built.heroErr = cp.error; built.spark = {};
         hero.innerHTML = '<section class="card hero"><div class="heroHead"><span class="providerPill"><i></i>GLM Coding Plan</span></div><div class="quotaSection"><span class="qLine">⚠ ' + esc(cp.error) + "</span></div></section>";
       }
-    } else { hero.innerHTML = ""; }
+    } else { hero.innerHTML = ""; built.hero = false; }
 
     var box = document.getElementById("plans");
     if (!d.plans.length && !d.buckets.length) {
-      if (!built.emptyPlans) { box.innerHTML = '<div class="empty">无其他生效套餐</div>'; built.emptyPlans = true; }
+      if (!built.emptyPlans) { box.innerHTML = '<div class="empty">无其他生效套餐</div>'; built.emptyPlans = true; built.planN = -1; }
     } else {
       built.emptyPlans = false;
       if (built.planN !== d.plans.length) {
@@ -246,7 +249,7 @@ async function load() {
     document.getElementById("dot").className = "dot bad";
     err.textContent = "获取失败：" + e.message;
     err.style.display = "block";
-  }
+  } finally { usageLoading = false; }
 }
 
 /* ================= 洞察 / 上下文 / Agent ================= */
@@ -272,8 +275,8 @@ function showErr(id, msg) {
   if (msg) { el.textContent = msg; el.style.display = "block"; } else el.style.display = "none";
 }
 /* 平滑 DOM：内容没变就不动（实时刷新不闪烁、滚动位置不丢）；返回是否真的更新 */
-function patchHTML(id, html) {
-  var el = document.getElementById(id);
+function patchHTML(id, html) { return patchElement(document.getElementById(id), html); }
+function patchElement(el, html) {
   if (!el || el._sourceHTML === html) return false;
   el._sourceHTML = html;
   var template = document.createElement('template');
@@ -334,7 +337,7 @@ function switchTab(tab) {
   document.querySelectorAll("#tabs button").forEach(function (b) { b.classList.toggle("on", b.dataset.tab === tab); b.setAttribute("aria-selected", b.dataset.tab === tab); b.tabIndex = b.dataset.tab === tab ? 0 : -1; });
   document.querySelectorAll(".tabpage").forEach(function (p) { p.hidden = p.id !== "tab-" + tab; });
   if (changed) animateSwap(document.getElementById("tab-" + tab));
-  if (tab === "usage") load();
+  if (tab === "usage") refreshUsage();
   if (tab === "insights") { ensureInsights(); startLive(); }
   if (tab === "context") { ensureContext(); startLive(); }
   if (tab === "agent") { ensureFleet(); startLive(); }
@@ -456,7 +459,9 @@ function dirName(s) {
 /* ---------- 上下文页 ---------- */
 function fillSessionSelect() {
   var sel = document.getElementById("ctxSession");
-  var opts = state.sessions.map(function (s) {
+  var sessions = state.sessions.slice();
+  if (state.sessionId && !sessions.some(s => s.id === state.sessionId)) sessions.unshift({ id: state.sessionId, title: state.ctx?.session?.title || state.sessionTitle || "当前会话" });
+  var opts = sessions.map(function (s) {
     return '<option value="' + esc(s.id) + '"' + (s.id === state.sessionId ? " selected" : "") + ">" + esc(s.title || s.id) + "</option>";
   });
   patchHTML("ctxSession", opts.join("") || '<option value="">最近会话</option>');
@@ -492,11 +497,11 @@ async function loadContext(silent) {
   try {
     var data = await callTool('get_session_context', sid ? { session_id: sid } : {});
     if (ticket !== requestTickets.context || sid !== state.sessionId) return;
-    state.ctx = data; state.sessionId = data.session.id; state.contextAt = Date.now();
+    state.ctx = data; state.sessionId = data.session.id; state.sessionTitle = data.session.title; state.contextAt = Date.now();
     state.lastActivity = Math.max(state.lastActivity, Number(data.session.updated || 0), data.live?.ts || 0);
     fillSessionSelect(); renderContext(); showErr('ctxErr', null);
     if (!silent) await loadBrowser();
-  } catch (e) { if (ticket === requestTickets.context) showErr('ctxErr', '上下文获取失败：' + e.message); }
+  } catch (e) { if (ticket === requestTickets.context) { showErr('ctxErr', '上下文获取失败：' + e.message); setBusy('browserPanel', false); } }
   finally { if (ticket === requestTickets.context) { inFlight.context = false; setBusy('tab-context', false); } }
 }
 async function loadBrowser(silent) {
@@ -584,6 +589,7 @@ function renderContext() {
     { n: "工具执行", v: t.tool_ms, c: "#14b8a6" },
   ].filter(function (x) { return x.v > 0; });
   patchHTML("ctxTimingBody", donutLegendBlock(timSegs, durMs(t.active_ms), "活跃时长", 108, true));
+  restoreContextPins();
   renderCurrent();
   renderTrend();
   renderEvents();
@@ -614,7 +620,7 @@ function schedule(){
     if (el) el.textContent = state.tab === "usage" ? Math.max(tick,0) + " 秒后刷新" : "自动同步";
     if (tick <= 0) {
       tick = REFRESH;
-      if (state.tab === "usage") load(); // 洞察/上下文/Agent 由 live 定时器按会话活跃度驱动
+      if (state.tab === "usage" && !document.hidden) refreshUsage(); // 洞察/上下文/Agent 由 live 定时器按会话活跃度驱动
     }
   }, 1000);
 }
@@ -623,7 +629,7 @@ async function manualRefresh() {
   if (button.disabled) return;
   button.disabled = true; button.classList.add('refreshing');
   try {
-    if (state.tab === 'usage') await Promise.all([load(), loadDetail(), loadHealth()]);
+    if (state.tab === 'usage') await refreshUsage();
     if (state.tab === 'insights') await loadInsights();
     if (state.tab === 'context') await loadContext();
     if (state.tab === 'agent') await ensureFleet();
@@ -646,7 +652,7 @@ function ensureDetailSkeleton(body) {
     + '<div class="items" id="dItems"></div>';
   body.dataset.built = "1";
 }
-function renderDetail() {
+function renderDetail(animate = false) {
   var body = document.getElementById("detailBody");
   if (!detailState.data) return;
   var sec = detailState.data[detailState.tab];
@@ -666,21 +672,10 @@ function renderDetail() {
   setMetric("dPk", (sm.peakRate * 100).toFixed(0) + "%");
   var bars = (sec.totals || []).map(function (v, i) {
     var h = Math.max(2, Math.round(v / max * 84));
-    var peak = (sec.periodTypes || [])[i] === "PEAK";
-    var t = (sec.xTime || [])[i] || "";
-    return '<div class="' + (peak ? "peak" : "") + '" data-h="' + h + '" style="height:2px" title="' + esc(t.slice(5, 16)) + " · " + fmtK(v) + ' token' + (peak ? " · 峰时" : " · 谷时") + '"></div>';
+    var peak = (sec.periodTypes || [])[i] === "PEAK", t = (sec.xTime || [])[i] || "";
+    return '<div data-key="' + esc(t + '-' + i) + '" class="' + (peak ? "peak" : "") + '" style="height:' + h + 'px" data-tip="' + esc(t.slice(5, 16)) + ' · ' + fmtK(v) + ' token' + (peak ? ' · 峰时' : ' · 谷时') + '"></div>';
   }).join("");
-  var barsEl = document.getElementById("dBars");
-  if (barsEl.dataset.sig !== sec.totals.join(",")) {
-    barsEl.dataset.sig = sec.totals.join(",");
-    barsEl.innerHTML = bars;
-    // 增长动画：先 2px 落位，下一帧长到目标高度
-    requestAnimationFrame(function () {
-      requestAnimationFrame(function () {
-        barsEl.querySelectorAll("div[data-h]").forEach(function (el) { el.style.height = el.dataset.h + "px"; });
-      });
-    });
-  }
+  patchHTML('dBars', bars);
   document.getElementById("dT0").textContent = ((sec.xTime || [])[0] || "").slice(5, 10);
   document.getElementById("dT1").textContent = ((sec.xTime || []).slice(-1)[0] || "").slice(5, 10);
   document.getElementById("dGran").textContent = "按" + (sec.granularity === "HOUR" ? "小时" : sec.granularity === "DAY" ? "天" : sec.granularity);
@@ -690,11 +685,10 @@ function renderDetail() {
       + '<span class="ib"><i style="width:' + Math.max(2, Math.round((it.total || 0) / top * 100)) + '%"></i></span>'
       + '<span class="iv">' + fmtK(it.total) + "</span></div>";
   }).join("");
-  var itemsEl = document.getElementById("dItems");
-  if (itemsEl.dataset.sig !== items) { itemsEl.dataset.sig = items; itemsEl.innerHTML = items; }
-  animateSwap(document.getElementById("detailCard"));
+  patchHTML('dItems', items);
+  if (animate) animateSwap(document.getElementById("detailCard"));
 }
-async function loadDetail() {
+async function loadDetail(animate = false) {
   var ticket = ++detailTicket, days = detailState.days;
   try {
     var r = await window.__bridgeCall("tools/call", { name: "get_usage_detail", arguments: { days: days } });
@@ -702,7 +696,7 @@ async function loadDetail() {
     if (!j.ok) throw new Error(j.error || "未知错误");
     if (ticket !== detailTicket || days !== detailState.days) return;
     detailState.data = j.data;
-    renderDetail();
+    renderDetail(animate);
   } catch (e) {
     if (ticket !== detailTicket) return;
     document.getElementById("detailBody").innerHTML = '<div class="err2">获取失败：' + esc(e.message) + "</div>";
@@ -712,13 +706,13 @@ document.getElementById("detailDays").addEventListener("click", function (e) {
   var b = e.target.closest("button"); if (!b || b.classList.contains("on")) return;
   detailState.days = Number(b.dataset.d);
   this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
-  loadDetail();
+  loadDetail(true);
 });
 document.getElementById("detailTab").addEventListener("click", function (e) {
   var b = e.target.closest("button"); if (!b) return;
   detailState.tab = b.dataset.t;
   this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
-  renderDetail();
+  renderDetail(true);
 });
 
 /* ---- 系统健康度（官方 model-performance-day；0 基准网格 + 日期轴）---- */
@@ -729,7 +723,7 @@ function ensureHealthSkeleton(body) {
   body.innerHTML = '<div class="healthSummary" id="healthSummary"></div><div class="healthChartCaption">高峰期平均解码速度 <span>tokens/s</span></div><div id="hSpeed"></div><div class="healthFoot" id="healthFoot"></div>';
   body.dataset.built = "1";
 }
-function renderHealth() {
+function renderHealth(animate = false) {
   var body = document.getElementById("healthBody");
   if (!healthState.data) return;
   var d = healthState.data;
@@ -744,7 +738,7 @@ function renderHealth() {
   var sigS = d.xTime.join(",") + "|" + d.proMax.join(",") + "|" + d.lite.join(",");
   if (speed.dataset.sig !== sigS) {
     speed.dataset.sig = sigS;
-    speed.innerHTML = speedChart(d);
+    patchHTML('hSpeed', speedChart(d));
     // 描线动画：下一帧把 dashoffset 放到 0，折线从左向右画出
     requestAnimationFrame(function () {
       requestAnimationFrame(function () {
@@ -752,9 +746,9 @@ function renderHealth() {
       });
     });
   }
-  animateSwap(document.getElementById("healthCard"));
+  if (animate) animateSwap(document.getElementById("healthCard"));
 }
-async function loadHealth() {
+async function loadHealth(animate = false) {
   var ticket = ++healthTicket, days = healthState.days;
   try {
     var r = await window.__bridgeCall("tools/call", { name: "get_health", arguments: { days: days } });
@@ -762,7 +756,7 @@ async function loadHealth() {
     if (!j.ok) throw new Error(j.error || "未知错误");
     if (ticket !== healthTicket || days !== healthState.days) return;
     healthState.data = j.data;
-    renderHealth();
+    renderHealth(animate);
   } catch (e) {
     if (ticket !== healthTicket) return;
     document.getElementById("healthBody").innerHTML = '<div class="err2">获取失败：' + esc(e.message) + "</div>";
@@ -772,7 +766,7 @@ document.getElementById("healthDays").addEventListener("click", function (e) {
   var b = e.target.closest("button"); if (!b || b.classList.contains("on")) return;
   healthState.days = Number(b.dataset.d);
   this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
-  loadHealth();
+  loadHealth(true);
 });
 
 async function keyStatus() {
@@ -813,4 +807,10 @@ async function saveKey(clear) {
     load();
   } catch (e) { document.getElementById("keystatus").textContent = "保存失败：" + e.message; }
 }
-window.addEventListener("bridge-ready", function () { load(); schedule(); keyStatus(); loadDetail(); loadHealth(); });
+var usageRefresh = null;
+function refreshUsage() {
+  if (usageRefresh) return usageRefresh;
+  usageRefresh = Promise.all([load(), loadDetail(), loadHealth()]).finally(() => { usageRefresh = null; });
+  return usageRefresh;
+}
+window.addEventListener("bridge-ready", function () { refreshUsage(); schedule(); keyStatus(); });
