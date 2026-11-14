@@ -754,3 +754,20 @@ dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self
 .healthFoot { color:var(--dim); font-size:10px; margin-top:8px; }
 @media(max-width:900px) { .usageDetails { grid-template-columns:minmax(0,1fr); } }
 @media(max-width:460px) { .usageDetails .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+
+/* Compact quota overview: align the paid windows and avoid empty free-plan lanes. */
+#hero .hero { padding:12px 14px; margin-bottom:12px; }
+#hero .heroHead { margin-bottom:10px; }
+#heroWrap { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+#heroWrap .quotaSection { min-width:0; padding:10px 12px; gap:6px; }
+#heroWrap .quotaHead { flex-wrap:wrap; }
+#heroWrap .sparkBox { margin-top:auto; }
+#plans { align-items:start; }
+#plans .plan { padding:11px 14px; }
+#plans .life { margin-bottom:8px; font-size:10.5px; }
+#plans .pwrap { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr)); gap:8px; }
+#plans .quotaSection { min-width:0; padding:8px 10px; gap:6px; border-radius:7px; }
+#plans .quotaHead { flex-wrap:wrap; gap:4px 8px; }
+#plans .qLine { font-size:10.5px; }
+#plans .l2:empty, #plans .sparkBox:empty { display:none; }
+@media(max-width:900px) { #heroWrap { grid-template-columns:minmax(0,1fr); } }

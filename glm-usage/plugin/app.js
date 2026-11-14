@@ -157,6 +157,7 @@ function patchSection(el, b, l1html, l2html, sparkHtml, sparkKey) {
   }
   pct.textContent = b.percent + "%";
   pct.style.color = lvColor(b.percent);
+  reset.hidden = !b.reset_at;
   reset.textContent = "重置 " + (b.reset_at ? until(b.reset_at, true) + "后" : "—");
   reset.className = "qReset" + (b.reset_at && b.reset_at - Math.floor(Date.now() / 1000) < 1800 ? " soon" : "");
   if (bar.dataset.pct !== String(b.percent)) {

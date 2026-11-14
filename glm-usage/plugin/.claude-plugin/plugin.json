@@ -1,6 +1,6 @@
 {
   "name": "glm-usage",
-  "version": "2.6.0",
+  "version": "2.6.1",
   "skills": "./skills",
   "commands": "./commands",
   "description": "GLM usage + ZCode context insight dashboard: quota gauges, burn rate, context stats, context browser, trend, fleet.",
