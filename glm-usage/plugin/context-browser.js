@@ -38,6 +38,7 @@ function browserItem(row, dna = false) {
 function renderBrowser() {
   const b = state.browser; if (!b) return;
   const rows = browserRows();
+  if (state.stripFocus && !rows.some(r => r.it.id === state.stripFocus)) state.stripFocus = null;
   const query = state.browserQuery;
   const filtered = rows.filter(r => (!query || `${r.it.title} ${r.it.preview} ${r.c.label} ${r.it.kind}`.toLowerCase().includes(query)) && (!state.catPick || r.c.key === state.catPick));
   document.getElementById('browserClear').hidden = !query;
@@ -51,7 +52,19 @@ function renderBrowser() {
     const cat = b.cats.find(c => c.key === state.catPick);
     patchHTML('browserSelection', `<span><i style="background:${CAT_HEX[state.catPick]}"></i>${esc(cat?.label || '')} · ${filtered.length} 项</span><button class="textButton" data-pick-cat="${state.catPick}">清除分类 ×</button>`);
   }
-  patchHTML('browserStrip', rows.map(r => `<button data-key="strip-${r.it.id}" data-item="${r.it.id}" data-cat="${r.c.key}" style="flex:${Math.max(1, r.it.tokens)};background:${CAT_HEX[r.c.key]}" data-tip="${esc(r.c.label)} · ${esc(r.it.title)}\n≈${fmt(r.it.tokens)} tokens" aria-label="${esc(r.it.title)}，约${fmt(r.it.tokens)} tokens"></button>`).join(''));
+  patchHTML('browserStrip', rows.map(r => `<button data-key="strip-${r.it.id}" tabindex="${r.it.id === (state.stripFocus || rows[0]?.it.id) ? 0 : -1}" data-item="${r.it.id}" data-cat="${r.c.key}" style="flex:${Math.max(1, r.it.tokens)};background:${CAT_HEX[r.c.key]}" data-tip="${esc(r.c.label)} · ${esc(r.it.title)}\n≈${fmt(r.it.tokens)} tokens" aria-label="${esc(r.it.title)}，约${fmt(r.it.tokens)} tokens"></button>`).join(''));
+  const strip = document.getElementById('browserStrip');
+  strip.onfocusin = e => {
+    const button = e.target.closest('[data-item]'); if (!button) return;
+    state.stripFocus = button.dataset.item;
+    strip.querySelectorAll('button').forEach(el => { el.tabIndex = el === button ? 0 : -1; });
+  };
+  strip.onkeydown = e => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault(); const buttons = [...strip.querySelectorAll('button')], at = buttons.indexOf(document.activeElement);
+    const i = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : Math.max(0, Math.min(buttons.length - 1, at + (e.key === 'ArrowRight' ? 1 : -1)));
+    buttons[i]?.focus();
+  };
   let html = '';
   if (!filtered.length) html = '<div class="empty">没有匹配的上下文条目。可清除搜索或分类筛选。</div>';
   else if (state.dna === 'map') {

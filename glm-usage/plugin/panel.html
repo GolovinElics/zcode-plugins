@@ -56,6 +56,7 @@
     <div id="hero"></div>
     <div class="cards" id="plans"></div>
 
+    <div class="usageDetails">
     <section class="card detail" id="detailCard">
       <div class="detailHead">
         <h3>使用详情</h3>
@@ -71,13 +72,14 @@
 
     <section class="card detail" id="healthCard">
       <div class="detailHead">
-        <h3>系统健康度 <span style="font-size:10.5px;color:var(--faint);font-weight:400">官方每日快照 · 高峰期优先保障 Max/Pro 的 Decode 速度</span></h3>
+        <h3>系统健康度</h3>
         <div class="seg" id="healthDays">
           <button data-d="1">今天</button><button data-d="7" class="on">7 天</button><button data-d="30">30 天</button>
         </div>
       </div>
       <div id="healthBody"><div class="err2" style="color:var(--faint)">加载中…</div></div>
     </section>
+    </div>
     <div class="footer">GLM Usage Dashboard · /glm-usage 随时唤起</div>
   </div>
 
@@ -237,6 +239,7 @@
 </dialog>
 <script>/* @inline:app.js */</script>
 <script>/* @inline:request-metrics.js */</script>
+<script>/* @inline:health-chart.js */</script>
 <script>/* @inline:charts.js */</script>
 <script>/* @inline:context-browser.js */</script>
 <script>/* @inline:interactions.js */</script>
