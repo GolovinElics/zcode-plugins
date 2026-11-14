@@ -771,3 +771,32 @@ dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self
 #plans .qLine { font-size:10.5px; }
 #plans .l2:empty, #plans .sparkBox:empty { display:none; }
 @media(max-width:900px) { #heroWrap { grid-template-columns:minmax(0,1fr); } }
+
+/* Interaction parity: transient preview and persistent selection have distinct states. */
+.segArc { animation:donutReveal .4s var(--ease) both; animation-delay:calc(var(--i) * 35ms); }
+@keyframes donutReveal { from { opacity:0; stroke-width:2; } }
+.dailyChart .col.dayHot { background:color-mix(in srgb,var(--acc) 13%,transparent); box-shadow:inset 0 0 0 1px var(--acc); }
+.heat button.dayHot { outline:2px solid var(--acc); outline-offset:1px; }
+.lgRow, .heat button, .dailyChart .col { transition:opacity .18s,background-color .18s,box-shadow .18s; }
+.catDim .catDim { opacity:1; }
+.dnaStrip .itemHot { filter:brightness(1.3); box-shadow:inset 0 0 0 1px var(--fg); }
+.evRow.eventHot { background:color-mix(in srgb,var(--acc) 10%,var(--card)); box-shadow:inset 2px 0 var(--acc); }
+.agentCard, .fleetRow { transition:opacity .18s,border-color .18s,background-color .18s,box-shadow .18s; }
+.agentCard.agentHot { box-shadow:0 3px 14px color-mix(in srgb,var(--agent) 18%,transparent); }
+.agentDim { opacity:.45; }
+.agentPinned { outline:1px solid var(--acc); outline-offset:2px; }
+.agentEdges g { transition:opacity .18s; }
+.agentEdges .agentLink { transition:stroke .18s,stroke-width .18s; }
+.agentEdges .edgeHot .agentLink { stroke:var(--acc); stroke-width:2; stroke-dasharray:4 5; animation:edgeFlow .65s linear infinite; }
+.agentEdges .edgeDim { opacity:.15; }
+@keyframes edgeFlow { to { stroke-dashoffset:-9; } }
+.agentCard .abar i, .fleetCtx .bar i { transition:width .32s var(--ease); }
+.agentInspector { margin-top:18px; border:1px solid var(--bd); border-radius:8px; padding:12px; background:var(--bg2); min-width:0; }
+.agentInspectorHead { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+.agentInspectorHead > div { flex:1; min-width:160px; }
+.agentInspectorHead b { display:block; font-size:12px; overflow-wrap:anywhere; }
+.agentInspector .stepMetrics { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.activityDetail { animation:detailReveal .18s var(--ease); }
+@keyframes detailReveal { from { opacity:.5; transform:translateY(-3px); } }
+@media(max-width:600px) { .agentInspector .stepMetrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(prefers-reduced-motion:reduce) { .segArc, .agentEdges .edgeHot .agentLink, .activityDetail { animation:none; } }

@@ -43,7 +43,7 @@ function bootActivity() {
   dialog.innerHTML = '<div class="inspectorHead"><div><div class="muted" id="activityScope"></div><h2 id="activityTitle"></h2></div><button class="closeButton" aria-label="关闭活动明细">×</button></div><div id="activitySummary" class="activitySummary"></div><div id="activityPrograms" class="activityPrograms"></div><div class="activityToolbar"><input type="search" id="activitySearch" class="searchInput" placeholder="搜索命令、文件或工具…" aria-label="搜索活动记录"><button id="activitySort" class="textButton">最近执行 ↓</button><span id="activityCount" class="muted"></span></div><div id="activityRows" class="activityRows"></div>';
   document.body.append(dialog);
   dialog.querySelector('.closeButton').onclick = () => dialog.close();
-  dialog.addEventListener('close', () => activity.ticket++);
+  dialog.addEventListener('close', () => { activity.ticket++; hideTip(); });
   dialog.addEventListener('click', e => {
     const lens = e.target.closest('[data-lens]');
     if (lens) { activity.lens = lens.dataset.lens; activity.query = ''; activity.pick = ''; activity.sort = 'recent'; document.getElementById('activitySearch').value = ''; renderActivity(); }

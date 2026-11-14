@@ -6,7 +6,7 @@ function donut(segs, centerTop, centerSub, size = 118) {
     if (!(s.v > 0)) return '';
     const pct = s.v / total * 100, cut = segs.filter(s => s.v > 0).length > 1 ? Math.min(.25, pct / 4) : 0;
     const offset = 125 - acc - cut; acc += pct;
-    return `<circle class="segArc" data-slice="${i}" style="--i:${i}" fill="none" stroke-width="4" cx="21" cy="21" r="15.9155" stroke="${s.c}" stroke-dasharray="${(pct - cut * 2).toFixed(3)} ${(100 - pct + cut * 2).toFixed(3)}" stroke-dashoffset="${offset.toFixed(3)}"/>`;
+    return `<circle class="segArc" data-slice="${esc(s.n || String(i))}" style="--i:${i}" fill="none" stroke-width="4" cx="21" cy="21" r="15.9155" stroke="${s.c}" stroke-dasharray="${(pct - cut * 2).toFixed(3)} ${(100 - pct + cut * 2).toFixed(3)}" stroke-dashoffset="${offset.toFixed(3)}"/>`;
   }).join('');
   return `<div class="lc-donut" style="width:${size}px;height:${size}px"><svg viewBox="0 0 42 42" width="${size}" height="${size}" aria-hidden="true">${arcs || '<circle class="lc-donut-track" fill="none" stroke-width="4" cx="21" cy="21" r="15.9155"/>'}</svg><div class="lc-donut-center" data-value="${esc(centerTop)}" data-label="${esc(centerSub || '')}"><b style="font-size:${Math.max(11, Math.round(size * .13))}px">${esc(centerTop)}</b>${centerSub != null ? `<span style="font-size:${Math.max(9, Math.round(size * .095))}px">${esc(centerSub)}</span>` : ''}</div></div>`;
 }
@@ -14,7 +14,7 @@ function donutLegendBlock(segs, centerTop, centerSub, size, timing = false) {
   const total = segs.reduce((a, s) => a + s.v, 0) || 1;
   return `<div class="donutWrap">${donut(segs, centerTop, centerSub, size)}<div class="legendGrid">${segs.map((s, i) => {
     const value = timing ? durMs(s.v) : cnum(s.v), pct = Math.round(s.v / total * 1000) / 10;
-    return `<button class="lgRow" data-slice="${i}" data-value="${esc(value)}" data-label="${esc(s.n)}" data-tip="${esc(s.n)} · ${timing ? durMs(s.v) : fmt(s.v) + ' tokens'} · ${pct}%\n点击固定高亮，再次点击或按 Esc 取消" aria-pressed="false"><i style="background:${s.c}"></i><span class="n">${esc(s.n)}</span><span class="p">${pct}%</span><span class="v">${value}</span></button>`;
+    return `<button class="lgRow" data-slice="${esc(s.n || String(i))}" data-value="${esc(value)}" data-label="${esc(s.n)}" data-tip="${esc(s.n)} · ${timing ? durMs(s.v) : fmt(s.v) + ' tokens'} · ${pct}%\n点击固定高亮，再次点击或按 Esc 取消" aria-pressed="false"><i style="background:${s.c}"></i><span class="n">${esc(s.n)}</span><span class="p">${pct}%</span><span class="v">${value}</span></button>`;
   }).join('')}</div></div>`;
 }
 function dateKey(value) {
@@ -73,7 +73,7 @@ function renderSessions() {
 let trendValues = [];
 function renderTrend() {
   const data = state.ctx, steps = data?.steps || [], box = document.getElementById('ctxTrend');
-  if (!steps.length) { renderTrend.signature = null; patchHTML('ctxTrend', '<div class="empty">该会话暂无模型请求记录</div>'); document.getElementById('ctxTrendDetail').hidden = true; return; }
+  if (!steps.length) { trendValues = []; state.trendHover = null; state.trendKey = null; renderTrend.signature = null; patchHTML('ctxTrend', '<div class="empty">该会话暂无模型请求记录</div>'); document.getElementById('ctxTrendDetail').hidden = true; return; }
   const sig = JSON.stringify([data.session.id, state.trendMode, steps]);
   if (renderTrend.signature === sig) { updateTrendPick(); return; }
   renderTrend.signature = sig;
@@ -118,12 +118,13 @@ function renderTrend() {
   patchHTML('ctxTrend', `<div class="trendScroll" tabindex="0" aria-label="模型请求趋势，左右方向键浏览请求"><svg viewBox="0 0 ${width} ${H}" style="width:${width}px;height:${H}px" aria-label="${deltaMode ? '输入增量' : '请求 Token'}趋势">${svg}</svg></div><div class="trendHint">悬浮查看 · 点击固定 · ← → 切换请求 · Esc 取消</div>`);
   const scroll = box.querySelector('.trendScroll'); if (follow && !state.trendKey) scroll.scrollLeft = scroll.scrollWidth;
   box.onpointerover = e => { const g = e.target.closest('[data-step]'); if (!g) return; hoverTrend(g); };
-  box.onpointerout = e => { if (!e.relatedTarget?.closest?.('[data-step]')) { box.querySelectorAll('.hovered').forEach(n => n.classList.remove('hovered')); hideTip(); } };
+  box.onpointerout = e => { if (!e.relatedTarget?.closest?.('[data-step]')) { state.trendHover = null; updateTrendPick(); hideTip(); } };
+  box.onfocusout = e => { if (!e.relatedTarget?.closest?.('[data-step]')) { state.trendHover = null; updateTrendPick(); } };
   box.onfocusin = e => { const g = e.target.closest('[data-step]'); if (g) hoverTrend(g); };
   box.onclick = e => { const g = e.target.closest('[data-step]'); if (g) pickTrend(g.dataset.step); };
   box.onkeydown = e => {
     const g = e.target.closest('[data-step]');
-    if (e.key === 'Escape') { state.trendKey = null; updateTrendPick(); hideTip(); return; }
+    if (e.key === 'Escape') { state.trendKey = null; state.trendHover = null; updateTrendPick(); hideTip(); return; }
     if ((e.key === 'Enter' || e.key === ' ') && g) { e.preventDefault(); pickTrend(g.dataset.step); }
     if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
       e.preventDefault(); const nodes = [...box.querySelectorAll('[data-step]')], at = nodes.indexOf(g);
@@ -135,25 +136,32 @@ function renderTrend() {
   updateTrendPick();
 }
 function hoverTrend(group) {
+  state.trendHover = group.dataset.step; updateTrendPick();
   document.querySelectorAll('#ctxTrend .hovered').forEach(el => el.classList.remove('hovered')); group.classList.add('hovered');
   const v = trendValues[Number(group.dataset.index)];
   showTip(group, `第 ${v.number} 步 · ${v.model}\n${new Date(v.ts).toLocaleString('zh-CN')}\n输入 ${fmt(v.input)} · 输出 ${fmt(v.output)}\n缓存读 ${fmt(v.cr)} · 缓存写 ${fmt(v.cw)}\n耗时 ${durMs(v.dur)}${state.trendMode === 'delta' ? '\n输入变化 ' + (v.delta == null ? (v.input > 0 ? '无上一有效请求' : '未报告输入') : (v.delta > 0 ? '+' : '') + fmt(v.delta)) : ''}${v.status === 'error' ? '\n请求失败：' + (v.error || '未知错误') : ''}`);
 }
-function pickTrend(key) { state.trendKey = state.trendKey === key ? null : key; updateTrendPick(); }
+function pickTrend(key) { state.trendHover = null; state.trendKey = state.trendKey === key ? null : key; updateTrendPick(); }
 function updateTrendPick() {
-  document.querySelectorAll('#ctxTrend [data-step]').forEach(g => { g.classList.toggle('selected', g.dataset.step === state.trendKey); g.setAttribute('aria-pressed', String(g.dataset.step === state.trendKey)); });
-  const v = trendValues.find(v => v.key === state.trendKey), el = document.getElementById('ctxTrendDetail'); el.hidden = !v;
+  document.querySelectorAll('#ctxTrend [data-step]').forEach(g => { g.classList.toggle('selected', g.dataset.step === state.trendKey); g.classList.toggle('hovered', g.dataset.step === state.trendHover); g.setAttribute('aria-pressed', String(g.dataset.step === state.trendKey)); });
+  const active = state.trendHover || state.trendKey;
+  document.querySelectorAll('#ctxEvents [data-event-ts]').forEach(row => {
+    const nearest = trendValues.reduce((best, v) => !best || Math.abs(v.ts - Number(row.dataset.eventTs)) < Math.abs(best.ts - Number(row.dataset.eventTs)) ? v : best, null);
+    row.classList.toggle('eventHot', !!active && nearest?.key === active);
+  });
+  const v = trendValues.find(v => v.key === active), el = document.getElementById('ctxTrendDetail'); el.hidden = !v;
   if (!v) return;
-  patchHTML('ctxTrendDetail', `<div class="hd"><b>第 ${v.number} 步</b><span class="tm">${new Date(v.ts).toLocaleString('zh-CN')}</span><button class="textButton" onclick="state.trendKey=null;updateTrendPick()">取消选择 ×</button></div><div class="stepMetrics"><span>输入 <b>${fmt(v.input)}</b></span><span>输出 <b>${fmt(v.output)}</b></span><span>缓存命中 <b>${v.input ? (v.cr / v.input * 100).toFixed(1) : '0'}%</b></span><span>耗时 <b>${durMs(v.dur)}</b></span></div><div class="stepNote">${esc(v.model)} · ${v.status === 'error' ? '请求失败：' + esc(v.error || '未知错误') : v.status === 'running' ? '请求执行中' : v.status === 'cancelled' ? '请求已取消' : '请求已完成'}${v.delta != null ? ' · 输入变化 ' + (v.delta > 0 ? '+' : '') + fmt(v.delta) : v.input > 0 ? '' : ' · 未报告输入，不计算增量'}</div>`);
+  patchHTML('ctxTrendDetail', `<div class="hd"><b>${state.trendHover && state.trendHover !== state.trendKey ? '预览' : '已固定'} · 第 ${v.number} 步</b><span class="tm">${new Date(v.ts).toLocaleString('zh-CN')}</span><button class="textButton" onclick="state.trendKey=null;state.trendHover=null;updateTrendPick()">取消选择 ×</button></div><div class="stepMetrics"><span>输入 <b>${fmt(v.input)}</b></span><span>输出 <b>${fmt(v.output)}</b></span><span>缓存命中 <b>${v.input ? (v.cr / v.input * 100).toFixed(1) : '0'}%</b></span><span>耗时 <b>${durMs(v.dur)}</b></span></div><div class="stepNote">${esc(v.model)} · ${v.status === 'error' ? '请求失败：' + esc(v.error || '未知错误') : v.status === 'running' ? '请求执行中' : v.status === 'cancelled' ? '请求已取消' : '请求已完成'}${v.delta != null ? ' · 输入变化 ' + (v.delta > 0 ? '+' : '') + fmt(v.delta) : v.input > 0 ? '' : ' · 未报告输入，不计算增量'}</div>`);
 }
 function renderEvents() {
   const events = state.ctx?.events || [];
   document.getElementById('ctxEvSub').textContent = `${events.length} 条`;
   const icons = { compact: '↓', overflow: '!', error: '!', switch: '⇄', spawn: '+', cancel: '⊘' };
   patchHTML('ctxEvents', [...events].reverse().slice(0, 80).map(e => `<button class="evRow" data-event-ts="${e.ts}" data-tip="${esc(e.detail || '')}\n${new Date(e.ts).toLocaleString('zh-CN')}\n点击定位最近请求"><span class="ic">${icons[e.type] || '·'}</span><span class="ty ${e.type}">${esc(e.label)}</span><span class="ds">${esc(e.detail || '')}</span><span class="tm">${agoTs(e.ts)}</span></button>`).join('') || '<div class="empty">该会话暂无上下文事件</div>');
+  updateTrendPick();
   document.getElementById('ctxEvents').onclick = e => {
     const row = e.target.closest('[data-event-ts]'); if (!row || !trendValues.length) return;
     const v = [...trendValues].sort((a, b) => Math.abs(a.ts - Number(row.dataset.eventTs)) - Math.abs(b.ts - Number(row.dataset.eventTs)))[0];
-    state.trendKey = v.key; updateTrendPick(); const g = [...document.querySelectorAll('[data-step]')].find(g => g.dataset.step === v.key); reveal(g); g?.focus();
+    state.trendHover = null; state.trendKey = v.key; updateTrendPick(); const g = [...document.querySelectorAll('[data-step]')].find(g => g.dataset.step === v.key); reveal(g); g?.focus();
   };
 }

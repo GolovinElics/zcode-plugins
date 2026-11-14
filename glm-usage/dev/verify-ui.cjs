@@ -15,7 +15,10 @@ async page => {
   check(await f.locator('#ctxTokensBody .segArc.highlighted').count() === 1, 'pinned donut lost on mouse leave');
   await page.keyboard.press('Escape');
   check(await f.locator('#ctxTokensBody .segArc.dimmed').count() === 0, 'escape does not reset donut');
-  results.push('donut hover, pin, reset');
+  await f.locator('#ctxTokensBody .lgRow').first().hover();
+  await f.locator('#ctxTokensBody .lc-donut-center').hover();
+  check(await f.locator('#ctxTokensBody .segArc.dimmed').count() === 0, 'donut remains dimmed over its center');
+  results.push('donut hover, center reset, pin, Escape');
 
   await f.locator('#ctxCurLegend [data-pick-cat=tool_results]').click();
   check(await f.locator('#ctxBrowser .brCat').count() === 1, 'category filter does not link to browser');
@@ -107,6 +110,12 @@ async page => {
   await f.locator('.agentChildren .agentCard').first().hover();
   check(await f.locator('.agentHot').count() === 2, 'agent graph and row not linked');
   await f.locator('.agentChildren .agentCard').first().click();
+  check(await f.locator('#agentInspector').innerText().then(t => t.includes('已固定')), 'agent inspector did not pin');
+  check(await f.locator('#agentEdges .edgeHot').count() === 1, 'agent edge did not follow selection');
+  await f.locator('#refreshBtn').click();
+  await f.locator('#refreshBtn:not([disabled])').waitFor();
+  check(await f.locator('.agentPinned').count() === 2, 'agent pin lost on refresh');
+  await f.locator('#agentInspector [data-sid]').click();
   await f.locator('#tab-context[aria-busy=false]').waitFor();
   check((await f.locator('#ctxStatsSub').innerText()).includes('缓存'), 'agent context navigation failed');
   results.push('agent hover and navigation');

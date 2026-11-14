@@ -98,20 +98,29 @@ function renderBrowser() {
 function agentCard(a, role) {
   const color = role === 'lead' ? '#14b8a6' : ['#6366f1', '#f59e0b', '#3b82f6'][Math.abs(hash(a.id)) % 3];
   const pct = a.window ? a.context / a.window * 100 : 0;
-  return `<button class="agentCard ${role === 'lead' ? 'lead' : ''}" data-sid="${esc(a.id)}" data-agent="${esc(a.id)}" style="--agent:${color}"><div class="ah"><span class="ad" style="background:${color}"></span><span class="an">${esc(a.title || a.id)}</span><span class="sPill">${role === 'lead' ? '主会话' : '子代理'}</span></div><div class="am">${esc(a.model || '未知模型')} · ${a.steps} 步</div><div class="agentValue">${cnum(a.context)}<span> / ${cnum(a.window)} tokens</span></div><div class="abar"><i style="width:${Math.min(pct, 100)}%;background:${color}"></i></div><div class="af"><span>累计 ${cnum(a.tokens)} tok</span><span>${pct.toFixed(1)}% 已用</span></div><div class="agentOpen">查看上下文 <span>↗</span></div></button>`;
+  return `<button class="agentCard ${role === 'lead' ? 'lead' : ''}" data-agent="${esc(a.id)}" style="--agent:${color}"><div class="ah"><span class="ad" style="background:${color}"></span><span class="an">${esc(a.title || a.id)}</span><span class="sPill">${role === 'lead' ? '主会话' : '子代理'}</span></div><div class="am">${esc(a.model || '未知模型')} · ${a.steps} 步</div><div class="agentValue">${cnum(a.context)}<span> / ${cnum(a.window)} tokens</span></div><div class="abar"><i style="width:${Math.min(pct, 100)}%;background:${color}"></i></div><div class="af"><span>累计 ${cnum(a.tokens)} tok</span><span>${pct.toFixed(1)}% 已用</span></div><div class="agentOpen">悬浮预览 · 点击固定 <span>⌖</span></div></button>`;
 }
 function renderFleet() {
   const f = state.fleet; if (!f) return;
   const sm = f.summary || {}, members = f.members || [];
   patchHTML('fleetStats', [[sm.agents || 1, '会话'], [sm.running || 0, '近期活跃'], [sm.work_items || 0, '待办事项'], [sm.messages || 0, '模型请求']].map(([v, l]) => `<div class="st"><div class="v">${v}</div><div class="l">${l}</div></div>`).join(''));
   patchHTML('fleetGrid', `<svg class="agentEdges" id="agentEdges" aria-hidden="true"></svg><div class="agentLead">${f.lead ? agentCard(f.lead, 'lead') : ''}</div>${members.length ? `<div class="agentChildren">${members.map(m => agentCard(m, 'member')).join('')}</div>` : '<div class="empty">该主会话尚未派出子代理</div>'}`);
-  document.getElementById('fleetNetSub').textContent = `${members.length} 个直接子代理 · 点击会话查看上下文`;
+  document.getElementById('fleetNetSub').textContent = `${members.length} 个直接子代理 · 悬浮预览 · 点击固定 · Esc 取消`;
   document.getElementById('fleetSub').textContent = `${members.length} 个 · 近期活跃按 3 分钟内更新估算`;
-  patchHTML('fleetMembers', members.map(m => `<button class="fleetRow" data-sid="${esc(m.id)}" data-agent="${esc(m.id)}"><span class="avatar">${esc((m.title || '?')[0])}</span><span class="fleetInfo"><span class="fn">${esc(m.title)}</span><span class="fm">${esc(m.model || '未知模型')} · ${m.steps} 步 · ${durMs(m.model_ms)}</span></span><span class="fleetCtx"><span class="fx"><span>Context ${cnum(m.context)}</span><span>${(m.context / Math.max(1, m.window) * 100).toFixed(1)}%</span></span><span class="bar"><i style="width:${Math.min(100, m.context / Math.max(1, m.window) * 100)}%"></i></span></span><span>↗</span></button>`).join('') || '<div class="empty">子代理会话将显示在这里。</div>');
-  const hover = e => { const a = e.target.closest('[data-agent]'); document.querySelectorAll('[data-agent]').forEach(el => el.classList.toggle('agentHot', !!a && el.dataset.agent === a.dataset.agent)); };
-  document.getElementById('tab-agent').onpointerover = hover;
-  document.getElementById('tab-agent').onpointerleave = () => document.querySelectorAll('.agentHot').forEach(el => el.classList.remove('agentHot'));
-  document.getElementById('tab-agent').onfocusin = hover;
+  patchHTML('fleetMembers', members.map(m => `<button class="fleetRow" data-agent="${esc(m.id)}"><span class="avatar">${esc((m.title || '?')[0])}</span><span class="fleetInfo"><span class="fn">${esc(m.title)}</span><span class="fm">${esc(m.model || '未知模型')} · ${m.steps} 步 · ${durMs(m.model_ms)}</span></span><span class="fleetCtx"><span class="fx"><span>Context ${cnum(m.context)}</span><span>${(m.context / Math.max(1, m.window) * 100).toFixed(1)}%</span></span><span class="bar"><i style="width:${Math.min(100, m.context / Math.max(1, m.window) * 100)}%"></i></span></span><span>↗</span></button>`).join('') || '<div class="empty">子代理会话将显示在这里。</div>');
+  const page = document.getElementById('tab-agent');
+  const hover = target => {
+    state.agentHover = target?.closest?.('[data-agent]')?.dataset.agent || null;
+    highlightAgent(); renderAgentInspector();
+  };
+  page.onpointerover = e => hover(e.target);
+  page.onpointerout = e => { if (!e.relatedTarget || !page.contains(e.relatedTarget)) hover(null); };
+  page.onfocusin = e => hover(e.target);
+  page.onfocusout = e => hover(e.relatedTarget);
+  const ids = [f.lead, ...members].filter(Boolean).map(a => a.id);
+  if (!ids.includes(state.agentPick)) state.agentPick = null;
+  if (!ids.includes(state.agentHover)) state.agentHover = null;
+  highlightAgent(); renderAgentInspector();
   requestAnimationFrame(drawFleetEdges);
   if (!renderFleet.observer) { renderFleet.observer = new ResizeObserver(drawFleetEdges); renderFleet.observer.observe(document.getElementById('fleetGrid')); }
 }
@@ -125,6 +134,32 @@ function drawFleetEdges() {
   patchHTML('agentEdges', [...grid.querySelectorAll('.agentChildren .agentCard')].map(el => {
     const child = el.getBoundingClientRect(), x2 = child.left + child.width / 2 - box.left, y2 = child.top - box.top;
     const middle = (y1 + y2) / 2;
-    return `<path d="M ${x1} ${y1} C ${x1} ${middle} ${x2} ${middle} ${x2} ${y2}" fill="none" stroke="var(--bd2)" stroke-width="1.5"/><circle cx="${x2}" cy="${y2}" r="2.5" fill="var(--acc)"/>`;
+    return `<g data-edge="${esc(el.dataset.agent)}"><path class="agentLink" d="M ${x1} ${y1} C ${x1} ${middle} ${x2} ${middle} ${x2} ${y2}" fill="none" stroke="var(--bd2)" stroke-width="1.5"/><circle cx="${x2}" cy="${y2}" r="2.5" fill="var(--acc)"/></g>`;
   }).join(''));
+  highlightAgent();
+}
+
+function highlightAgent() {
+  const active = state.agentHover || state.agentPick;
+  const lead = state.fleet?.lead?.id;
+  document.querySelectorAll('#tab-agent [data-agent]').forEach(el => {
+    el.classList.toggle('agentHot', el.dataset.agent === active);
+    el.classList.toggle('agentDim', !!active && el.dataset.agent !== active && el.dataset.agent !== lead);
+    el.classList.toggle('agentPinned', el.dataset.agent === state.agentPick);
+    el.setAttribute('aria-pressed', String(el.dataset.agent === state.agentPick));
+  });
+  document.querySelectorAll('[data-edge]').forEach(el => {
+    el.classList.toggle('edgeHot', !!active && (active === lead || el.dataset.edge === active));
+    el.classList.toggle('edgeDim', !!active && active !== lead && el.dataset.edge !== active);
+  });
+}
+function renderAgentInspector() {
+  const fleet = state.fleet;
+  const a = [fleet?.lead, ...(fleet?.members || [])].find(a => a && a.id === (state.agentHover || state.agentPick)) || fleet?.lead;
+  if (!a) return;
+  const pinned = state.agentPick === a.id;
+  const pct = a.window ? (a.context / a.window * 100).toFixed(1) + '%' : '窗口未知';
+  patchHTML('agentInspector', `<div class="agentInspectorHead"><div><span class="muted">${pinned ? '已固定' : '会话预览'}</span><b>${esc(a.title || a.id)}</b></div><button data-sid="${esc(a.id)}" class="textButton">打开上下文 ↗</button>${state.agentPick ? '<button class="textButton" data-agent-clear>取消固定 ×</button>' : ''}</div><div class="stepMetrics"><span>当前上下文<b>${cnum(a.context)} · ${pct}</b></span><span>累计 Token<b>${cnum(a.tokens)}</b></span><span>模型请求<b>${a.steps} 步</b></span><span>模型耗时<b>${durMs(a.model_ms || 0)}</b></span></div><div class="stepNote">${esc(a.model || '未知模型')} · ${a.id === fleet.lead?.id ? '主会话' : '子代理'} · 活跃状态按最近更新时间估算</div>`);
+  const clear = document.getElementById('agentInspector').querySelector('[data-agent-clear]');
+  if (clear) clear.onclick = () => { state.agentPick = null; state.agentHover = null; highlightAgent(); renderAgentInspector(); };
 }

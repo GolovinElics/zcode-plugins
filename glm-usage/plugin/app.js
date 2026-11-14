@@ -326,11 +326,14 @@ document.getElementById("tabs").addEventListener("click", function (ev) {
 });
 function switchTab(tab) {
   if (window.hideTip) hideTip();
+  const changed = state.tab !== tab;
   state.tab = tab;
+  state.hoverCat = null; state.trendHover = null; state.agentHover = null;
   stopLive();
   document.getElementById("refreshsel").closest(".selectbox").hidden = tab !== "usage";
   document.querySelectorAll("#tabs button").forEach(function (b) { b.classList.toggle("on", b.dataset.tab === tab); b.setAttribute("aria-selected", b.dataset.tab === tab); b.tabIndex = b.dataset.tab === tab ? 0 : -1; });
   document.querySelectorAll(".tabpage").forEach(function (p) { p.hidden = p.id !== "tab-" + tab; });
+  if (changed) animateSwap(document.getElementById("tab-" + tab));
   if (tab === "usage") load();
   if (tab === "insights") { ensureInsights(); startLive(); }
   if (tab === "context") { ensureContext(); startLive(); }
@@ -471,9 +474,10 @@ document.getElementById("trendMode").addEventListener("click", function (ev) {
 document.getElementById("dnaMode").addEventListener("click", function (ev) {
   var b = ev.target.closest("button[data-m]");
   if (!b) return;
+  if (state.dna === b.dataset.m) return;
   state.dna = b.dataset.m;
   document.querySelectorAll("#dnaMode button").forEach(function (x) { x.classList.toggle("on", x === b); });
-  renderBrowser();
+  renderBrowser(); animateSwap(document.getElementById("ctxBrowser"));
 });
 async function ensureContext() {
   if (!state.sessions.length && !state.insights) await loadInsights(true);
