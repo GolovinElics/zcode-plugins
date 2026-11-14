@@ -28,7 +28,7 @@ import { execFileSync } from "node:child_process";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PANEL_URI = "ui://glm-usage/panel.html";
-const VERSION = "1.4.3";
+const VERSION = "1.5.0";
 const APP_VERSION = "3.18.2";
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8791"; // 仅当用户自建网页版时提示用，不作为依赖
 
@@ -172,6 +172,70 @@ async function fetchBalance() {
   return json.data || {};
 }
 
+/* ---------- 官方使用详情（token-usage/usage-detail） ---------- */
+
+function fmtLocalDayHour(d) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+let detailCache = { at: 0, days: 0, data: null }; // 5 分钟缓存，避免高频打官方接口
+async function fetchUsageDetail(days = 7) {
+  days = [1, 7, 30].includes(days) ? days : 7;
+  if (detailCache.data && detailCache.days === days && Date.now() - detailCache.at < 5 * 60 * 1000) {
+    return detailCache.data;
+  }
+  const apiKey = configuredApiKey();
+  const token = apiKey || loadCodingPlanToken();
+  const base = {
+    startTime: fmtLocalDayHour(new Date(Date.now() - days * 86400 * 1000)),
+    endTime: fmtLocalDayHour(new Date()),
+    type: 1,
+  };
+  async function one(usageType) {
+    const url = "https://open.bigmodel.cn/api/monitor/token-usage/usage-detail?" +
+      new URLSearchParams({ ...base, usageType }).toString();
+    const json = await httpsGetJson(url, { Authorization: token });
+    if (!json.success) throw new Error(json.msg || `usage-detail(${usageType}) code=${json.code}`);
+    const d = json.data || {};
+    const block = d.modelUsage || d.mcpUsage || null;
+    if (!block) return null;
+    const n = (block.xTime || []).length;
+    const totals = new Array(n).fill(0);
+    for (const m of block.modelDataList || []) {
+      for (const [k, arr] of Object.entries(m)) {
+        if (k.endsWith("Usage") && Array.isArray(arr)) {
+          for (let i = 0; i < n && i < arr.length; i++) totals[i] += arr[i] || 0;
+        }
+      }
+    }
+    const items = (block.modelSummaryList || block.toolSummaryList || []).map((x) => ({
+      name: x.modelName || x.toolName || x.modelCode || x.toolCode || "?",
+      total: x.totalTokens ?? x.totalCalls ?? 0,
+    })).sort((a, b) => b.total - a.total);
+    return {
+      granularity: d.granularity || "HOUR",
+      xTime: block.xTime || [],
+      periodTypes: block.periodTypes || [],
+      totals,
+      items,
+      summary: {
+        total: Number(d.summary?.totalTokens?.value || block.totalUsage?.totalTokens || 0),
+        daily: Number(d.summary?.averageDailyTokens?.value || 0),
+        cacheHit: Number(d.summary?.cacheHitRate?.value || 0),
+        peakRate: 1 - Number(d.summary?.offPeakUsageRate?.value || 0),
+      },
+    };
+  }
+  const [model, mcp] = await Promise.allSettled([one("MODEL"), one("MCP")]);
+  const data = {
+    model: model.status === "fulfilled" ? model.value : { error: model.reason?.message },
+    mcp: mcp.status === "fulfilled" ? mcp.value : { error: mcp.reason?.message },
+  };
+  detailCache = { at: Date.now(), days, data };
+  return data;
+}
+
 /* ---------- 数据整理 ---------- */
 
 function normalizeBalance(data) {
@@ -309,6 +373,12 @@ const TOOLS = [
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
   {
+    name: "get_usage_detail",
+    description: "Fetch official usage detail (hourly totals with peak/off-peak, per-model/per-tool breakdown, cache hit rate) for the last N days (1/7/30). Returns JSON text.",
+    inputSchema: { type: "object", properties: { days: { type: "number", description: "1, 7 or 30" } }, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+  {
     name: "set_coding_key",
     description: "Save the bigmodel.cn Coding Plan API key for this machine (stored in ~/.glm-usage/config.json, mode 600). NOTE: tool arguments may persist in conversation history — for a human user, prefer the panel's settings input which bypasses the conversation. Pass empty string to clear.",
     inputSchema: { type: "object", properties: { key: { type: "string" } }, required: ["key"], additionalProperties: false },
@@ -351,6 +421,14 @@ async function handleToolCall(name, args) {
   }
   if (name === "get_usage_json") {
     return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: await buildUsagePayload() }) }] };
+  }
+  if (name === "get_usage_detail") {
+    try {
+      const days = [1, 7, 30].includes(Number(args?.days)) ? Number(args.days) : 7;
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: await fetchUsageDetail(days) }) }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }] };
+    }
   }
   if (name === "get_usage") {
     try {

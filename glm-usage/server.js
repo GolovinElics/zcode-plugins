@@ -156,6 +156,70 @@ async function fetchBalance() {
   return json.data || {};
 }
 
+/* ---------- 官方使用详情（token-usage/usage-detail，模型+工具） ---------- */
+
+function fmtLocalDayHour(d) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+let detailCache = { at: 0, days: 0, data: null }; // 5 分钟服务端缓存，避免高频打官方接口
+async function fetchUsageDetail(days = 7) {
+  days = [1, 7, 30].includes(days) ? days : 7;
+  if (detailCache.data && detailCache.days === days && Date.now() - detailCache.at < 5 * 60 * 1000) {
+    return detailCache.data;
+  }
+  const apiKey = configuredApiKey();
+  const token = apiKey || loadCodingPlanToken();
+  const end = new Date();
+  const start = new Date(Date.now() - days * 86400 * 1000);
+  const base = { startTime: fmtLocalDayHour(start), endTime: fmtLocalDayHour(end), type: 1 };
+
+  async function one(usageType) {
+    const url = "https://open.bigmodel.cn/api/monitor/token-usage/usage-detail?" +
+      new URLSearchParams({ ...base, usageType }).toString();
+    const json = await httpsGetJson(url, { Authorization: token });
+    if (!json.success) throw new Error(json.msg || `usage-detail(${usageType}) code=${json.code}`);
+    const d = json.data || {};
+    const block = d.modelUsage || d.mcpUsage || null;
+    if (!block) return null;
+    // 按小时桶汇总各序列（uncached/cached/output 等）
+    const n = (block.xTime || []).length;
+    const totals = new Array(n).fill(0);
+    for (const m of block.modelDataList || []) {
+      for (const [k, arr] of Object.entries(m)) {
+        if (k.endsWith("Usage") && Array.isArray(arr)) {
+          for (let i = 0; i < n && i < arr.length; i++) totals[i] += arr[i] || 0;
+        }
+      }
+    }
+    const items = (block.modelSummaryList || (block.toolSummaryList || [])).map((x) => ({
+      name: x.modelName || x.toolName || x.modelCode || x.toolCode || "?",
+      total: x.totalTokens ?? x.totalCalls ?? 0,
+    })).sort((a, b) => b.total - a.total);
+    return {
+      granularity: d.granularity || "HOUR",
+      xTime: block.xTime || [],
+      periodTypes: block.periodTypes || [],
+      totals,
+      items,
+      summary: {
+        total: Number(d.summary?.totalTokens?.value || block.totalUsage?.totalTokens || 0),
+        daily: Number(d.summary?.averageDailyTokens?.value || 0),
+        cacheHit: Number(d.summary?.cacheHitRate?.value || 0),
+        peakRate: 1 - Number(d.summary?.offPeakUsageRate?.value || 0),
+      },
+    };
+  }
+  const [model, mcp] = await Promise.allSettled([one("MODEL"), one("MCP")]);
+  const data = {
+    model: model.status === "fulfilled" ? model.value : { error: model.reason?.message },
+    mcp: mcp.status === "fulfilled" ? mcp.value : { error: mcp.reason?.message },
+  };
+  detailCache = { at: Date.now(), days, data };
+  return data;
+}
+
 /* ---------- 历史采样与速率 ---------- */
 
 function readHistory() {
@@ -285,6 +349,7 @@ const HTML = `<!doctype html>
   /* ---------- 级联入场（CPAMC cardEnter） ---------- */
   .enter { animation:card-in .22s var(--ease) both; animation-delay:var(--delay,0ms); }
   @keyframes card-in { from { opacity:0; transform:translateY(5px); } }
+  @media (prefers-reduced-motion: reduce) { .enter { animation:none; } }
 
   /* ---------- 卡片通用（statTile 配方：14px 圆角 / 1px 边框 / 透感纸面） ---------- */
   .card { position:relative; background:var(--card); border:1px solid var(--bd); border-radius:var(--radius-card); padding:16px; transition:border-color 160ms var(--ease), transform 160ms var(--ease); }
@@ -326,6 +391,32 @@ const HTML = `<!doctype html>
 
   /* ---------- 免费套餐卡片 ---------- */
   .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(295px,1fr)); gap:12px; }
+
+  /* 使用详情（官方数据） */
+  .detail { margin-top:14px; }
+  .detailHead { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .detailHead h3 { font-size:13.5px; font-weight:650; margin-right:auto; }
+  .seg { display:inline-flex; border:1px solid var(--bd); border-radius:9px; overflow:hidden; }
+  .seg button { border:0; border-radius:0; padding:3px 12px; background:transparent; color:var(--dim); }
+  .seg button.on { background:var(--card2); color:var(--fg); font-weight:600; }
+  .metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; margin-bottom:12px; }
+  .metric { background:color-mix(in srgb,var(--bg2) 55%,transparent); border:1px solid color-mix(in srgb,var(--bd) 70%,transparent); border-radius:var(--radius-inner); padding:8px 12px; }
+  .metric .mv { font:650 15px var(--mono); font-variant-numeric:tabular-nums; }
+  .metric .mk { font-size:10.5px; color:var(--dim); margin-top:1px; }
+  .bars { display:flex; align-items:flex-end; gap:1px; height:88px; padding:2px 0; }
+  .bars > i { flex:1; min-width:1px; border-radius:1px 1px 0 0; background:var(--acc); opacity:.75; transition:opacity .15s; }
+  .bars > i.peak { background:var(--mid); }
+  .bars > i:hover { opacity:1; }
+  .barAxis { display:flex; justify-content:space-between; font-size:9.5px; color:var(--faint); margin-top:4px; font-family:var(--mono); }
+  .legend { display:flex; gap:12px; font-size:10.5px; color:var(--dim); margin-top:6px; }
+  .legend i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
+  .items { margin-top:12px; display:flex; flex-direction:column; gap:6px; }
+  .item { display:flex; align-items:center; gap:10px; font-size:12px; }
+  .item .in { width:110px; color:var(--sub); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .item .ib { flex:1; height:5px; border-radius:99px; background:color-mix(in srgb,var(--fg) 7%,transparent); overflow:hidden; }
+  .item .ib > i { display:block; height:100%; border-radius:99px; background:var(--acc); }
+  .item .iv { width:90px; text-align:right; font:500 11.5px var(--mono); color:var(--sub); font-variant-numeric:tabular-nums; }
+  .detail .err2 { color:var(--bad); font-size:12px; padding:8px 0; }
   .plan h3 { font-size:13px; font-weight:650; display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:1px; }
   .plan .life { font-size:11px; color:var(--faint); margin-bottom:10px; }
   .badge { font-size:10.5px; padding:1px 8px; border-radius:var(--radius-full); border:1px solid var(--bd); color:var(--dim); font-weight:500; }
@@ -364,6 +455,19 @@ const HTML = `<!doctype html>
   <div class="err" id="err"></div>
   <div id="hero"></div>
   <div class="cards" id="plans"></div>
+
+  <section class="card detail enter" id="detailCard" style="--delay:180ms">
+    <div class="detailHead">
+      <h3>使用详情</h3>
+      <div class="seg" id="detailDays">
+        <button data-d="1">今天</button><button data-d="7" class="on">7 天</button><button data-d="30">30 天</button>
+      </div>
+      <div class="seg" id="detailTab">
+        <button data-t="model" class="on">模型</button><button data-t="mcp">工具</button>
+      </div>
+    </div>
+    <div id="detailBody"><div class="empty" style="padding:18px 0">加载中…</div></div>
+  </section>
   <div class="footer">GLM Usage Dashboard · 本地服务 127.0.0.1:8791 · 历史采样保留 48 小时 · /glm-usage 随时唤起</div>
 </div>
 
@@ -397,23 +501,32 @@ function toggleTheme(){
   applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
 }
 
-/* ---- 平滑走势：降采样 + Catmull-Rom 贝塞尔曲线 ---- */
+/* ---- 平滑走势：降采样 + 单调三次插值（Fritsch–Carlson，同 d3 curveMonotoneX：不过冲、不回折、无交叉） ---- */
 function downsample(pts, n) {
   if (!pts || pts.length <= n) return pts || [];
   var out = [], step = (pts.length - 1) / (n - 1);
   for (var i = 0; i < n; i++) out.push(pts[Math.round(i * step)]);
   return out;
 }
-function smoothPath(xy) {
+function monotonePath(xy) {
   if (xy.length < 3) return "M" + xy.map(function(q){ return q[0].toFixed(1) + "," + q[1].toFixed(1); }).join(" L");
-  var d = "M" + xy[0][0].toFixed(1) + "," + xy[0][1].toFixed(1);
-  for (var i = 0; i < xy.length - 1; i++) {
-    var p0 = xy[i - 1] || xy[i], p1 = xy[i], p2 = xy[i + 1], p3 = xy[i + 2] || p2;
-    d += " C" + (p1[0] + (p2[0] - p0[0]) / 6).toFixed(1) + "," + (p1[1] + (p2[1] - p0[1]) / 6).toFixed(1)
-       + " " + (p2[0] - (p3[0] - p1[0]) / 6).toFixed(1) + "," + (p2[1] - (p3[1] - p1[1]) / 6).toFixed(1)
-       + " " + p2[0].toFixed(1) + "," + p2[1].toFixed(1);
+  var n = xy.length, m = new Array(n), d = new Array(n - 1), i;
+  for (i = 0; i < n - 1; i++) d[i] = (xy[i + 1][1] - xy[i][1]) / (xy[i + 1][0] - xy[i][0]);
+  m[0] = d[0]; m[n - 1] = d[n - 2];
+  for (i = 1; i < n - 1; i++) m[i] = (d[i - 1] * d[i] <= 0) ? 0 : (d[i - 1] + d[i]) / 2;
+  for (i = 0; i < n - 1; i++) {
+    if (d[i] === 0) { m[i] = 0; m[i + 1] = 0; continue; }
+    var a = m[i] / d[i], b = m[i + 1] / d[i], s = a * a + b * b;
+    if (s > 9) { var t = 3 / Math.sqrt(s); m[i] = t * a * d[i]; m[i + 1] = t * b * d[i]; }
   }
-  return d;
+  var out = "M" + xy[0][0].toFixed(1) + "," + xy[0][1].toFixed(1);
+  for (i = 0; i < n - 1; i++) {
+    var h = xy[i + 1][0] - xy[i][0];
+    out += " C" + (xy[i][0] + h / 3).toFixed(1) + "," + (xy[i][1] + m[i] * h / 3).toFixed(1)
+         + " " + (xy[i + 1][0] - h / 3).toFixed(1) + "," + (xy[i + 1][1] - m[i + 1] * h / 3).toFixed(1)
+         + " " + xy[i + 1][0].toFixed(1) + "," + xy[i + 1][1].toFixed(1);
+  }
+  return out;
 }
 function sparkline(pts, color) {
   if (!pts || pts.length < 2) return '<div class="sparkCap"><span>走势将随采样积累显示（本机定时记录已用量）</span></div>';
@@ -423,12 +536,17 @@ function sparkline(pts, color) {
   if (v1 === v0) v1 = v0 + 1;
   if (t1 === t0) t1 = t0 + 1;
   var xy = pp.map(function(p){ return [pad + (p[0] - t0) / (t1 - t0) * (W - pad * 2), H - pad - (p[1] - v0) / (v1 - v0) * (H - pad * 2)]; });
-  var line = smoothPath(xy);
+  var line = monotonePath(xy);
   var area = line + " L" + (W - pad) + "," + (H - pad) + " L" + pad + "," + (H - pad) + " Z";
-  return '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" style="width:100%;height:26px;display:block">'
-    + '<path d="' + area + '" style="fill:' + color + ';opacity:.12"/>'
-    + '<path d="' + line + '" style="fill:none;stroke:' + color + ';stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round" vector-effect="non-scaling-stroke"/></svg>'
-    + '<div class="sparkCap"><span>近 48 小时已用增长 · 本机采样</span><span>' + pp.length + ' 点</span></div>';
+  sparkline._n = (sparkline._n || 0) + 1;
+  var gid = "sg" + sparkline._n;
+  return '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" style="width:100%;height:26px;display:block;overflow:hidden">'
+    + '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="0" y2="1">'
+    + '<stop offset="0" stop-color="' + color + '" stop-opacity=".22"/><stop offset="1" stop-color="' + color + '" stop-opacity="0"/>'
+    + '</linearGradient></defs>'
+    + '<path d="' + area + '" fill="url(#' + gid + ')"/>'
+    + '<path d="' + line + '" fill="none" stroke="' + color + '" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>'
+    + '<div class="sparkCap"><span>近 48 小时已用 · 本机采样</span><span>' + pp.length + ' 点</span></div>';
 }
 
 function etaParts(b, rate){
@@ -589,10 +707,74 @@ async function saveRefresh(v) {
   if (j.ok) { REFRESH = Number(v); tick = REFRESH; schedule(); keyStatus(); }
 }
 
+/* ---- 使用详情（官方 token-usage/usage-detail 数据）---- */
+var detailState = { days: 7, tab: "model", data: null };
+function fmtTokD(n) {
+  if (n >= 1e8) return (n / 1e8).toFixed(2) + " 亿";
+  if (n >= 1e4) return (n / 1e4).toFixed(1) + " 万";
+  return String(Math.round(n));
+}
+function renderDetail() {
+  var body = document.getElementById("detailBody");
+  var d = detailState.data;
+  if (!d) { body.innerHTML = '<div class="empty" style="padding:18px 0">加载中…</div>'; return; }
+  var sec = d[detailState.tab];
+  if (!sec) { body.innerHTML = '<div class="empty" style="padding:18px 0">无数据</div>'; return; }
+  if (sec.error) { body.innerHTML = '<div class="err2">⚠ ' + esc(sec.error) + "</div>"; return; }
+  var s = sec.summary || {}, max = Math.max.apply(null, [1].concat(sec.totals || []));
+  var bars = (sec.totals || []).map(function (v, i) {
+    var h = Math.max(2, Math.round(v / max * 84));
+    var peak = (sec.periodTypes || [])[i] === "PEAK";
+    var t = (sec.xTime || [])[i] || "";
+    return '<i class="' + (peak ? "peak" : "") + '" style="height:' + h + 'px" title="' + esc(t.slice(5, 16)) + " · " + fmtTokD(v) + ' token' + (peak ? " · 峰时" : " · 谷时") + '"></i>';
+  }).join("");
+  var items = (sec.items || []).slice(0, 8).map(function (it) {
+    var top = sec.items[0] ? sec.items[0].total || 1 : 1;
+    return '<div class="item"><span class="in" title="' + esc(it.name) + '">' + esc(it.name) + "</span>"
+      + '<span class="ib"><i style="width:' + Math.max(2, Math.round((it.total || 0) / top * 100)) + '%"></i></span>'
+      + '<span class="iv">' + fmtTokD(it.total) + "</span></div>";
+  }).join("");
+  body.innerHTML =
+    '<div class="metrics">'
+    + '<div class="metric"><div class="mv">' + fmtTokD(s.total) + '</div><div class="mk">总量 token</div></div>'
+    + '<div class="metric"><div class="mv">' + fmtTokD(s.daily) + '</div><div class="mk">日均 token</div></div>'
+    + '<div class="metric"><div class="mv">' + (s.cacheHit * 100).toFixed(1) + '%</div><div class="mk">缓存命中</div></div>'
+    + '<div class="metric"><div class="mv">' + (s.peakRate * 100).toFixed(0) + '%</div><div class="mk">峰时占比</div></div>'
+    + "</div>"
+    + '<div class="bars">' + bars + "</div>"
+    + '<div class="barAxis"><span>' + esc(((sec.xTime || [])[0] || "").slice(5, 10)) + "</span><span>" + esc(((sec.xTime || []).slice(-1)[0] || "").slice(5, 10)) + '</span></div>'
+    + '<div class="legend"><span><i style="background:var(--acc)"></i>谷时</span><span><i style="background:var(--mid)"></i>峰时</span><span>按' + (sec.granularity === "HOUR" ? "小时" : sec.granularity) + "</span></div>"
+    + '<div class="items">' + items + "</div>";
+}
+async function loadDetail() {
+  try {
+    var r = await fetch("/api/detail?days=" + detailState.days);
+    var j = await r.json();
+    if (!j.ok) throw new Error(j.error || "未知错误");
+    detailState.data = j.data;
+    renderDetail();
+  } catch (e) {
+    document.getElementById("detailBody").innerHTML = '<div class="err2">获取失败：' + esc(e.message) + "</div>";
+  }
+}
+document.getElementById("detailDays").addEventListener("click", function (e) {
+  var b = e.target.closest("button"); if (!b) return;
+  detailState.days = Number(b.dataset.d);
+  this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
+  detailState.data = null; renderDetail(); loadDetail();
+});
+document.getElementById("detailTab").addEventListener("click", function (e) {
+  var b = e.target.closest("button"); if (!b) return;
+  detailState.tab = b.dataset.t;
+  this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
+  renderDetail();
+});
+
 applyTheme(document.documentElement.getAttribute("data-theme") || "dark");
 keyStatus();
 schedule();
 load();
+loadDetail();
 </script></body></html>`;
 
 /* ---------- HTTP 服务 ---------- */
@@ -620,6 +802,19 @@ const server = http.createServer((req, res) => {
 
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
         res.end(JSON.stringify({ ok: true, data: out }));
+      });
+    return;
+  }
+  if (req.url === "/api/detail" || req.url.startsWith("/api/detail?")) {
+    const days = Number(new URL(req.url, "http://x").searchParams.get("days")) || 7;
+    fetchUsageDetail(days)
+      .then((data) => {
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ ok: true, data }));
+      })
+      .catch((e) => {
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
       });
     return;
   }
