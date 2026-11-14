@@ -362,6 +362,14 @@ const HTML = `<!doctype html>
   button { background:var(--card2); color:var(--sub); border:1px solid var(--bd); border-radius:8px; padding:4px 13px; cursor:pointer; font-size:12px; font-weight:500; transition:all 150ms ease; }
   button:hover { border-color:var(--bd2); color:var(--fg); }
   button.icon { padding:4px 9px; font-size:13px; line-height:1.4; }
+  .themeBtn { width:32px; height:28px; padding:0; display:inline-flex; align-items:center; justify-content:center; border-radius:99px; }
+  .themeBtn svg { display:block; transition:transform .55s var(--ease); }
+  .themeBtn .rays line { transition:opacity .3s ease, transform .45s var(--ease); transform-origin:12px 12px; }
+  .themeBtn .maskC { transition:cx .5s var(--ease), cy .5s var(--ease); }
+  [data-theme="dark"] .themeBtn .rays line { opacity:0; transform:rotate(-40deg) scale(.55); }
+  [data-theme="dark"] .themeBtn .maskC { cx:17.3px; cy:2.9px; }
+  [data-theme="light"] .themeBtn .rays line { opacity:1; transform:rotate(0deg) scale(1); }
+  [data-theme="light"] .themeBtn .maskC { cx:30px; cy:-2px; }
   select { background:var(--bg2); border:1px solid var(--bd); color:var(--fg); border-radius:8px; padding:4px 8px; font-size:12px; }
   .subline { font-size:11.5px; color:var(--faint); margin-bottom:20px; }
   .subline a { color:var(--dim); text-decoration:none; border-bottom:1px dashed var(--faint); }
@@ -472,7 +480,21 @@ const HTML = `<!doctype html>
     <div class="topright">
       <span class="countdown" id="countdown">—</span>
       <button onclick="load()">刷新</button>
-      <button class="icon" id="themebtn" onclick="toggleTheme()" title="切换亮/暗主题">🌙</button>
+      <button class="icon themeBtn" id="themebtn" onclick="toggleTheme()" title="切换亮/暗主题" aria-label="切换亮/暗主题">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+          <mask id="themeMask">
+            <rect x="-6" y="-6" width="36" height="36" fill="#fff"/>
+            <circle class="maskC" cx="30" cy="-2" r="6.6" fill="#000"/>
+          </mask>
+          <g class="rays">
+            <line x1="12" y1="1.6" x2="12" y2="3.6"/><line x1="12" y1="20.4" x2="12" y2="22.4"/>
+            <line x1="1.6" y1="12" x2="3.6" y2="12"/><line x1="20.4" y1="12" x2="22.4" y2="12"/>
+            <line x1="4.9" y1="4.9" x2="6.3" y2="6.3"/><line x1="17.7" y1="17.7" x2="19.1" y2="19.1"/>
+            <line x1="4.9" y1="19.1" x2="6.3" y2="17.7"/><line x1="17.7" y1="6.3" x2="19.1" y2="4.9"/>
+          </g>
+          <circle cx="12" cy="12" r="5.4" mask="url(#themeMask)"/>
+        </svg>
+      </button>
     </div>
   </div>
   <div class="subline" id="subline">接口定时拉取 · 燃烧速率按最近 5 分钟～6 小时样本估算 · <a href="https://bigmodel.cn/coding-plan/personal/usage" target="_blank">官方用量页（含用量明细/健康度/额度重置/加油包）↗</a></div>
@@ -542,10 +564,13 @@ var lvColor = function(p){ return p >= 90 ? "var(--bad)" : p >= 70 ? "var(--mid)
 
 function applyTheme(t){
   document.documentElement.setAttribute("data-theme", t);
-  document.getElementById("themebtn").textContent = t === "dark" ? "🌙" : "☀️";
   try { localStorage.setItem("glm-theme", t); } catch(e){}
 }
+var themeRot = 0;
 function toggleTheme(){
+  themeRot += 180;
+  var svg = document.querySelector("#themebtn svg");
+  if (svg) svg.style.transform = "rotate(" + themeRot + "deg)";
   applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
 }
 
