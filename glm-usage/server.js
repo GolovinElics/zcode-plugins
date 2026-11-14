@@ -838,34 +838,31 @@ document.getElementById("detailTab").addEventListener("click", function (e) {
 var healthState = { days: 7, data: null };
 /* 官方风格速度图：Y 轴刻度 + 网格线 + X 轴日期 + 上方图例（0 基准，刻度取 20 的倍数） */
 function speedChart(d) {
-  var W = 860, H = 300, padL = 52, padR = 16, padT = 14, padB = 34, n = (d.xTime || []).length;
+  var W = 860, H = 320, padL = 56, padR = 20, padT = 30, padB = 48, n = (d.xTime || []).length;
   var all = (d.proMax || []).concat(d.lite || []).filter(function (v) { return v != null; });
   if (!all.length || n < 2) return '<div class="empty" style="padding:24px 0">暂无健康度数据</div>';
   var hiRaw = Math.max.apply(null, all);
   var step = 20;
   var hi = Math.max(step, Math.ceil(hiRaw / step) * step);
-  var ticks = [];
-  for (var v = 0; v <= hi; v += step) ticks.push(v);
-  function y(v) { return padT + (1 - v / hi) * (H - padT - padB); }
+  var plotB = H - padB; // 网格底（0 刻度线）
+  function y(v) { return padT + (1 - v / hi) * (plotB - padT); }
   function x(i) { return padL + i / (n - 1) * (W - padL - padR); }
   function pathOf(data) { return monotonePath(data.map(function (v, i) { return [x(i), y(v)]; })); }
-  var grid = ticks.map(function (t) {
-    return '<line x1="' + padL + '" y1="' + y(t).toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y(t).toFixed(1) + '" stroke="rgba(128,140,160,.18)" stroke-width="1"/>'
-      + '<text x="' + (padL - 8) + '" y="' + (y(t) + 4).toFixed(1) + '" text-anchor="end" style="font:11px var(--mono)" fill="var(--dim)">' + t + '</text>';
-  }).join("");
-  var xTicks = [];
+  var svg = '<text x="' + padL + '" y="14" style="font:11px sans-serif" fill="var(--dim)">tokens/s</text>';
+  for (var v = 0; v <= hi; v += step) {
+    svg += '<line x1="' + padL + '" y1="' + y(v).toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y(v).toFixed(1) + '" stroke="rgba(128,140,160,.18)" stroke-width="1"/>'
+      + '<text x="' + (padL - 12) + '" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end" style="font:11px var(--mono)" fill="var(--dim)">' + v + '</text>';
+  }
   var every = Math.max(1, Math.ceil(n / 5));
   for (var i = 0; i < n; i += every) {
-    xTicks.push('<text x="' + x(i).toFixed(1) + '" y="' + (H - padB + 20) + '" text-anchor="middle" style="font:11px var(--mono)" fill="var(--dim)">' + ((d.xTime || [])[i] || "").slice(5, 10) + '</text>');
+    svg += '<text x="' + x(i).toFixed(1) + '" y="' + (plotB + 24) + '" text-anchor="middle" style="font:11px var(--mono)" fill="var(--dim)">' + ((d.xTime || [])[i] || "").slice(5, 10) + '</text>';
   }
-  var out = '<svg viewBox="0 0 ' + W + " " + H + '" style="width:100%;height:auto;display:block">'
-    + '<text x="' + padL + '" y="' + (padT - 2) + '" style="font:11px sans-serif" fill="var(--dim)">tokens/s</text>'
-    + grid
-    + '<path d="' + pathOf(d.proMax || []) + '" fill="none" stroke="#4082F5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
-    + '<path d="' + pathOf(d.lite || []) + '" fill="none" stroke="#FF8E42" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
-    + xTicks.join("")
-    + "</svg>";
-  return out;
+  if ((n - 1) % every !== 0) { // 末日期补齐（右对齐，避开均匀刻度）
+    svg += '<text x="' + (W - padR) + '" y="' + (plotB + 24) + '" text-anchor="end" style="font:11px var(--mono)" fill="var(--dim)">' + ((d.xTime || [])[n - 1] || "").slice(5, 10) + '</text>';
+  }
+  svg += '<path d="' + pathOf(d.proMax || []) + '" fill="none" stroke="#4082F5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+    + '<path d="' + pathOf(d.lite || []) + '" fill="none" stroke="#FF8E42" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>';
+  return '<svg viewBox="0 0 ' + W + " " + H + '" style="width:100%;height:auto;display:block">' + svg + "</svg>";
 }
 function ensureHealthSkeleton(body) {
   if (body.dataset.built === "1") return;
