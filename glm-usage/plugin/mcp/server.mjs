@@ -36,7 +36,7 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* 回退 CLI 
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PANEL_URI = "ui://glm-usage/panel.html";
-const VERSION = "2.1.0";
+const VERSION = "2.2.0";
 const APP_VERSION = "3.18.2";
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8791"; // 仅当用户自建网页版时提示用，不作为依赖
 
@@ -191,14 +191,15 @@ async function fetchBalance() {
   return json.data || {};
 }
 
-/* ---------- 官方使用详情（token-usage/usage-detail） ---------- */
+/* ---------- 官方使用详情（token-usage/usage-detail） ----------
+ * 合并自 glm-usage-dashboard v1.6.3（另一工作线的成果），带 5 分钟缓存 */
 
 function fmtLocalDayHour(d) {
   const p = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-let detailCache = { at: 0, days: 0, data: null }; // 5 分钟缓存，避免高频打官方接口
+let detailCache = { at: 0, days: 0, data: null };
 async function fetchUsageDetail(days = 7) {
   days = [1, 7, 30].includes(days) ? days : 7;
   if (detailCache.data && detailCache.days === days && Date.now() - detailCache.at < 5 * 60 * 1000) {
@@ -1080,6 +1081,18 @@ const TOOLS = [
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
   {
+    name: "get_usage_detail",
+    description: "Fetch official usage detail (hourly totals with peak/off-peak, per-model/per-tool breakdown, cache hit rate) for the last N days (1/7/30). Returns JSON text.",
+    inputSchema: { type: "object", properties: { days: { type: "number", description: "1, 7 or 30" } }, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: "get_health",
+    description: "Fetch official system health daily snapshot (Max&Pro vs Lite decode speed and success rate) for the last N days (1/7/30). Returns JSON text.",
+    inputSchema: { type: "object", properties: { days: { type: "number", description: "1, 7 or 30" } }, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+  {
     name: "get_insights",
     description: "Aggregate local ZCode session analytics for a time range: KPIs (sessions/turns/steps/tokens/cache hit/active time), daily activity, per-model and per-tool stats, top commands and files, and a session list. Read-only, local.",
     inputSchema: { type: "object", properties: { range: { type: "string", enum: ["today", "7d", "30d", "all"], description: "Time range preset, default 7d" } }, additionalProperties: false },
@@ -1187,6 +1200,22 @@ async function handleToolCall(name, args) {
       return { content: [{ type: "text", text: await usageText() }] };
     } catch (e) {
       return { content: [{ type: "text", text: `获取失败：${e.message}` }], isError: true };
+    }
+  }
+  if (name === "get_usage_detail") {
+    try {
+      const days = [1, 7, 30].includes(Number(args?.days)) ? Number(args.days) : 7;
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: await fetchUsageDetail(days) }) }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }], isError: true };
+    }
+  }
+  if (name === "get_health") {
+    try {
+      const days = [1, 7, 30].includes(Number(args?.days)) ? Number(args.days) : 7;
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: await fetchHealth(days) }) }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }], isError: true };
     }
   }
   if (name === "get_insights") {
