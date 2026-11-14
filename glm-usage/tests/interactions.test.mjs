@@ -67,3 +67,14 @@ test('trend hover previews another step then restores the pinned detail and link
   r.state.trendHover=null; r.updateTrendPick(); assert(detail.html.includes('第 1 步')); assert(!events[0].classes.has('eventHot'));
   r.state.trendKey=null; r.updateTrendPick(); assert(detail.hidden);
 });
+test('scroll clears transient hover while preserving pinned requests and agents', () => {
+  const r=runtime({querySelectorAll:()=>[]});
+  Object.assign(r.state,{trendHover:'preview',trendKey:'pinned',agentHover:'b',agentPick:'a',hoverCat:'tools',catPick:'system'});
+  const calls=[];
+  for(const name of ['highlightCategory','highlightDay','updateTrendPick','highlightAgent','renderAgentInspector']) r[name]=()=>calls.push(name);
+  r.resetTransientHover();
+  assert.equal(r.state.trendHover,null); assert.equal(r.state.trendKey,'pinned');
+  assert.equal(r.state.agentHover,null); assert.equal(r.state.agentPick,'a');
+  assert.equal(r.state.hoverCat,null); assert.equal(r.state.catPick,'system');
+  assert(calls.includes('updateTrendPick')); assert(calls.includes('renderAgentInspector'));
+});
