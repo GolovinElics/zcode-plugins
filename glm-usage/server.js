@@ -399,18 +399,38 @@ function toggleTheme(){
   applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
 }
 
-function sparkline(pts, color){
+/* ---- 平滑走势：降采样 + Catmull-Rom 贝塞尔曲线 ---- */
+function downsample(pts, n) {
+  if (!pts || pts.length <= n) return pts || [];
+  var out = [], step = (pts.length - 1) / (n - 1);
+  for (var i = 0; i < n; i++) out.push(pts[Math.round(i * step)]);
+  return out;
+}
+function smoothPath(xy) {
+  if (xy.length < 3) return "M" + xy.map(function(q){ return q[0].toFixed(1) + "," + q[1].toFixed(1); }).join(" L");
+  var d = "M" + xy[0][0].toFixed(1) + "," + xy[0][1].toFixed(1);
+  for (var i = 0; i < xy.length - 1; i++) {
+    var p0 = xy[i - 1] || xy[i], p1 = xy[i], p2 = xy[i + 1], p3 = xy[i + 2] || p2;
+    d += " C" + (p1[0] + (p2[0] - p0[0]) / 6).toFixed(1) + "," + (p1[1] + (p2[1] - p0[1]) / 6).toFixed(1)
+       + " " + (p2[0] - (p3[0] - p1[0]) / 6).toFixed(1) + "," + (p2[1] - (p3[1] - p1[1]) / 6).toFixed(1)
+       + " " + p2[0].toFixed(1) + "," + p2[1].toFixed(1);
+  }
+  return d;
+}
+function sparkline(pts, color) {
   if (!pts || pts.length < 2) return "";
-  var W = 230, H = 30, ts = pts.map(function(p){return p[0];}), vs = pts.map(function(p){return p[1];});
-  var t0 = ts[0], t1 = ts[ts.length-1], v0 = Math.min.apply(null, vs), v1 = Math.max.apply(null, vs);
+  var W = 230, H = 30, pp = downsample(pts, 90);
+  var vs = pp.map(function(p){ return p[1]; });
+  var t0 = pp[0][0], t1 = pp[pp.length - 1][0], v0 = Math.min.apply(null, vs), v1 = Math.max.apply(null, vs);
   if (v1 === v0) v1 = v0 + 1;
   if (t1 === t0) t1 = t0 + 1;
-  var xy = pts.map(function(p){ return [(p[0]-t0)/(t1-t0)*W, H-3-(p[1]-v0)/(v1-v0)*(H-8)]; });
-  var poly = xy.map(function(q){ return q[0].toFixed(1) + "," + q[1].toFixed(1); }).join(" ");
-  return '<div class="spark" title="近 48 小时已用走势"><svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none">'
-    + '<line class="base" x1="0" y1="' + (H-3) + '" x2="' + W + '" y2="' + (H-3) + '"/>'
-    + '<polygon points="0,' + (H-3) + " " + poly + " " + W + "," + (H-3) + '" style="fill:' + color + '"/>'
-    + '<polyline points="' + poly + '" style="stroke:' + color + '"/></svg></div>';
+  var xy = pp.map(function(p){ return [(p[0] - t0) / (t1 - t0) * W, H - 3 - (p[1] - v0) / (v1 - v0) * (H - 8)]; });
+  var line = smoothPath(xy);
+  var area = line + " L" + W + "," + (H - 3) + " L0," + (H - 3) + " Z";
+  return '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" style="width:100%;height:30px;overflow:visible">'
+    + '<line class="base" x1="0" y1="' + (H - 3) + '" x2="' + W + '" y2="' + (H - 3) + '"/>'
+    + '<path d="' + area + '" style="fill:' + color + ';opacity:.12"/>'
+    + '<path d="' + line + '" style="fill:none;stroke:' + color + ';stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round"/></svg>';
 }
 
 function etaParts(b, rate){
@@ -425,18 +445,29 @@ function etaParts(b, rate){
     + (danger ? "" : ' <span class="safe">✓ 重置前够用</span>');
 }
 
-function quotaSection(b, opts){
-  var resetSoon = b.reset_at && (b.reset_at - Math.floor(Date.now()/1000)) < 1800;
+/* ---- 局部更新渲染：DOM 只建一次，之后按字段打补丁（刷新不闪烁）---- */
+var built = { hero: false, heroErr: null, planN: -1, spark: {} };
+function sectionHTML(b) {
   return '<div class="quotaSection">'
-    + '<div class="quotaHead"><span class="qLabel">' + esc(b.label || b.show_name) + "</span>"
-    + '<span class="qMeta"><span class="qPct" style="color:' + lvColor(b.percent) + '">' + b.percent + '%</span>'
-    + '<span class="qReset' + (resetSoon ? " soon" : "") + '">重置 ' + (b.reset_at ? until(b.reset_at, true) + "后" : "—") + "</span></span></div>"
-    + '<div class="meter"><i class="' + lvClass(b.percent) + '" style="width:' + b.percent + '%"></i></div>'
-    + '<div class="qLine">已用 <b>' + fmt(b.used) + "</b> / " + fmt(b.total)
-    + '<span class="sep">·</span>剩余 <b>' + fmt(b.remaining) + "</b>"
-    + (opts && opts.second ? '<span class="sep">·</span>' + opts.second : "") + "</div>"
-    + (opts && opts.rateLine ? '<div class="qLine">' + opts.rateLine + "</div>" : "")
-    + (opts && opts.spark ? opts.spark : "") + "</div>";
+    + '<div class="quotaHead"><span class="qLabel">' + esc(b.label || b.show_name || "") + '</span>'
+    + '<span class="qMeta"><span class="qPct"></span><span class="qReset"></span></span></div>'
+    + '<div class="meter"><i style="width:0%"></i></div>'
+    + '<div class="qLine l1"></div><div class="qLine l2"></div><div class="sparkBox"></div></div>';
+}
+function patchSection(el, b, l1html, l2html, sparkHtml, sparkKey) {
+  if (!el) return;
+  var pct = el.querySelector(".qPct"), reset = el.querySelector(".qReset"),
+      bar = el.querySelector(".meter > i"), l1 = el.querySelector(".l1"),
+      l2 = el.querySelector(".l2"), sb = el.querySelector(".sparkBox");
+  pct.textContent = b.percent + "%";
+  pct.style.color = lvColor(b.percent);
+  reset.textContent = "重置 " + (b.reset_at ? until(b.reset_at, true) + "后" : "—");
+  reset.className = "qReset" + (b.reset_at && b.reset_at - Math.floor(Date.now() / 1000) < 1800 ? " soon" : "");
+  bar.style.width = b.percent + "%";
+  bar.className = lvClass(b.percent);
+  if (l1 && l1.innerHTML !== l1html) l1.innerHTML = l1html;
+  if (l2 && l2 && l2html && l2.innerHTML !== l2html) l2.innerHTML = l2html;
+  if (sb) { if (built.spark[sparkKey] !== sparkHtml) { built.spark[sparkKey] = sparkHtml; sb.innerHTML = sparkHtml; } }
 }
 
 async function load() {
@@ -448,44 +479,72 @@ async function load() {
     if (!j.ok) throw new Error(j.error || "未知错误");
     var d = j.data;
     tick = REFRESH;
+    document.getElementById("dot").className = "dot";
+    var upd = document.getElementById("updated");
+    if (upd) upd.textContent = "更新于 " + new Date().toLocaleTimeString("zh-CN");
 
-    /* Coding Plan hero */
+    /* Coding Plan hero：首建卡片，之后仅打补丁 */
     var hero = document.getElementById("hero");
     var cp = d.coding_plan;
     if (cp && !cp.error) {
       var rates = d.rates || {}, hist = d.history || {};
-      hero.innerHTML = '<section class="card hero enter" style="--delay:0ms">'
-        + '<div class="heroHead"><span class="providerPill"><i></i>GLM Coding Plan</span>'
-        + '<span class="levelPill">' + esc(cp.level).toUpperCase() + "</span>"
-        + '<span class="heroStatus">付费编程套餐 · bigmodel.cn</span></div>'
-        + '<div class="quotaWrap">'
-        + cp.limits.map(function(b, i){
-            return quotaSection(b, { rateLine: etaParts(b, rates[b.id]), spark: sparkline(hist[b.id], lvColor(b.percent)) });
-          }).join("")
-        + "</div></section>";
+      if (built.heroErr !== null) { hero.innerHTML = ""; built.heroErr = null; }
+      if (!built.hero) {
+        hero.innerHTML = '<section class="card hero enter" style="--delay:0ms">'
+          + '<div class="heroHead"><span class="providerPill"><i></i>GLM Coding Plan</span>'
+          + '<span class="levelPill" id="cpLevel"></span>'
+          + '<span class="heroStatus">付费编程套餐 · bigmodel.cn</span></div>'
+          + '<div class="quotaWrap" id="heroWrap"></div></section>';
+        built.hero = true;
+      }
+      document.getElementById("cpLevel").textContent = esc(cp.level).toUpperCase();
+      var wrap = document.getElementById("heroWrap");
+      if (wrap.children.length !== cp.limits.length) wrap.innerHTML = cp.limits.map(sectionHTML).join("");
+      cp.limits.forEach(function (b, i) {
+        patchSection(wrap.children[i], b,
+          "已用 <b>" + fmt(b.used) + "</b> / " + fmt(b.total) + '<span class="sep">·</span>剩余 <b>' + fmt(b.remaining) + "</b>",
+          etaParts(b, rates[b.id]),
+          sparkline(hist[b.id], lvColor(b.percent)), b.id);
+      });
     } else if (cp && cp.error) {
-      hero.innerHTML = '<section class="card hero enter"><div class="heroHead"><span class="providerPill"><i></i>GLM Coding Plan</span></div><div class="quotaSection"><span class="qLine">⚠ ' + esc(cp.error) + "</span></div></section>";
+      if (built.heroErr !== cp.error) {
+        built.hero = false; built.heroErr = cp.error; built.spark = {};
+        hero.innerHTML = '<section class="card hero enter"><div class="heroHead"><span class="providerPill"><i></i>GLM Coding Plan</span></div><div class="quotaSection"><span class="qLine">⚠ ' + esc(cp.error) + "</span></div></section>";
+      }
     } else { hero.innerHTML = ""; }
 
-    /* 免费套餐 */
+    /* 免费套餐：同策略 */
     var box = document.getElementById("plans");
     if (!d.plans.length && !d.buckets.length) {
-      box.innerHTML = '<div class="empty">无其他生效套餐</div>';
+      if (!built.emptyPlans) { box.innerHTML = '<div class="empty">无其他生效套餐</div>'; built.emptyPlans = true; }
     } else {
-      box.innerHTML = d.plans.map(function(p, pi){
-        var buckets = d.buckets.filter(function(b){ return b.plan_id === p.plan_id_raw; });
-        return '<section class="card plan enter" style="--delay:' + (60 + pi * 60) + 'ms"><h3>' + esc(p.name)
-          + ' <span class="badge ' + p.status + '">' + (p.status === "active" ? "生效中" : p.status === "expired" ? "已到期" : esc(p.status)) + "</span>"
-          + (p.description ? '<span class="badge">' + esc(p.description) + "</span>" : "") + "</h3>"
-          + '<div class="life">有效期至 ' + (p.ends_at ? new Date(p.ends_at*1000).toLocaleString("zh-CN") : "长期") + " · 剩 " + until(p.ends_at) + "</div>"
-          + buckets.map(function(b){
-              return quotaSection({
-                label: b.show_name, percent: b.percent, used: b.used, total: b.total,
-                remaining: b.remaining, reset_at: b.expires_at,
-              }, { second: "单位 " + (b.show_name || "") });
-            }).join("")
-          + "</section>";
-      }).join("");
+      built.emptyPlans = false;
+      if (built.planN !== d.plans.length) {
+        box.innerHTML = d.plans.map(function (p, pi) {
+          return '<section class="card plan enter" style="--delay:' + (60 + pi * 60) + 'ms">'
+            + '<h3><span class="pname"></span> <span class="badge"></span>'
+            + (p.description ? '<span class="badge pdesc">' + esc(p.description) + "</span>" : "")
+            + "</h3>" + '<div class="life"></div><div class="pwrap"></div></section>';
+        }).join("");
+        built.planN = d.plans.length;
+      }
+      d.plans.forEach(function (p, pi) {
+        var card = box.children[pi];
+        if (!card) return;
+        var st = card.querySelector(".badge");
+        st.className = "badge " + p.status;
+        st.textContent = p.status === "active" ? "生效中" : p.status === "expired" ? "已到期" : esc(p.status);
+        card.querySelector(".pname").textContent = p.name;
+        card.querySelector(".life").textContent = "有效期至 " + (p.ends_at ? new Date(p.ends_at * 1000).toLocaleString("zh-CN") : "长期") + " · 剩 " + until(p.ends_at);
+        var buckets = d.buckets.filter(function (b) { return b.plan_id === p.plan_id_raw; });
+        var pw = card.querySelector(".pwrap");
+        if (pw.children.length !== buckets.length) pw.innerHTML = buckets.map(function (b) { return sectionHTML(b); }).join("");
+        buckets.forEach(function (b, bi) {
+          patchSection(pw.children[bi], b,
+            "已用 <b>" + fmtK(b.used) + "</b> / " + fmtK(b.total) + '<span class="sep">·</span>剩余 <b>' + fmtK(b.remaining) + "</b>（" + b.percent + "%）",
+            "", "", b.id);
+        });
+      });
     }
   } catch (e) {
     document.getElementById("dot").className = "dot bad";
