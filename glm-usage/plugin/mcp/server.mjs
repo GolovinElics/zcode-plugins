@@ -20,6 +20,7 @@
  */
 "use strict";
 
+import { readViews, writeView } from './view-store.mjs';
 import crypto from "node:crypto";
 import os from "node:os";
 import fs from "node:fs";
@@ -38,7 +39,7 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* 回退 CLI 
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PANEL_URI = "ui://glm-usage/panel.html";
-const VERSION = "2.7.4";
+const VERSION = "2.8.0";
 const APP_VERSION = "3.18.2";
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8791"; // 仅当用户自建网页版时提示用，不作为依赖
 
@@ -1074,6 +1075,18 @@ const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
+    name: "get_view_state",
+    description: "Read saved local dashboard view state.",
+    inputSchema: {type:"object",properties:{},additionalProperties:false},
+    annotations:{readOnlyHint:true,openWorldHint:false},
+  },
+  {
+    name: "save_view_state",
+    description: "Persist one dashboard view locally, isolated by session identifier.",
+    inputSchema: {type:"object",properties:{key:{type:"string"},value:{type:"object"}},required:["key","value"],additionalProperties:false},
+    annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false},
+  },
+  {
     name: "get_config",
     description: "Read local glm-usage config (key masked, refresh/sample intervals, context windows, pricing).",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -1111,6 +1124,10 @@ function defaultSessionId() {
 }
 
 async function handleToolCall(name, args) {
+  if (name === "get_view_state" || name === "save_view_state") {
+    if (name === "save_view_state") writeView(DATA_DIR,args.key,args.value);
+    return {content:[{type:"text",text:JSON.stringify({ok:true,data:name === "get_view_state" ? readViews(DATA_DIR) : true})}]};
+  }
   if (name === "get_activity") {
     try { return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: fetchActivity(args) }) }] }; }
     catch (e) { return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }], isError: true }; }

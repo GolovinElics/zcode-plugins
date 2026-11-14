@@ -813,4 +813,4 @@ function refreshUsage() {
   usageRefresh = Promise.all([load(), loadDetail(), loadHealth()]).finally(() => { usageRefresh = null; });
   return usageRefresh;
 }
-window.addEventListener("bridge-ready", function () { refreshUsage(); schedule(); keyStatus(); });
+window.addEventListener("bridge-ready", async function () { await restorePersistentViews(); schedule(); keyStatus(); switchTab(state.tab); });
