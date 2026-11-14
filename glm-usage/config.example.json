@@ -1,0 +1,5 @@
+{
+  "coding_plan_key": "<在此填入 bigmodel.cn 控制台的 API Key>",
+  "refresh_seconds": 30,
+  "sample_seconds": 60
+}

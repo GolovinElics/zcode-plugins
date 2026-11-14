@@ -1,0 +1,7 @@
+# 含 API Key 的本地配置，绝不入库
+config.json
+# 本地运行数据与日志
+history.json
+server.log
+*.log
+.DS_Store
