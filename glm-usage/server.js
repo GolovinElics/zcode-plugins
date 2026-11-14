@@ -320,11 +320,9 @@ const HTML = `<!doctype html>
   .qLine .safe { color:var(--ok); }
   .qLine .danger { color:var(--bad); font-weight:600; }
 
-  .spark { height:30px; margin-top:2px; }
-  .spark svg { width:100%; height:100%; overflow:visible; }
-  .spark polyline { fill:none; stroke-width:1.5; opacity:.85; }
-  .spark polygon { opacity:.1; }
-  .spark .base { stroke:color-mix(in srgb,var(--fg) 7%,transparent); stroke-width:1; }
+  .spark { margin-top:2px; }
+  .spark svg { width:100%; height:26px; display:block; }
+  .sparkCap { display:flex; justify-content:space-between; font-size:10px; color:var(--faint); margin-top:3px; font-family:inherit; }
 
   /* ---------- 免费套餐卡片 ---------- */
   .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(295px,1fr)); gap:12px; }
@@ -348,7 +346,7 @@ const HTML = `<!doctype html>
       <button class="icon" id="themebtn" onclick="toggleTheme()" title="切换亮/暗主题">🌙</button>
     </div>
   </div>
-  <div class="subline" id="subline">接口定时拉取 · 燃烧速率按最近 5 分钟～6 小时样本估算 · <a href="https://bigmodel.cn/coding-plan/personal/usage" target="_blank">官方用量页 ↗</a></div>
+  <div class="subline" id="subline">接口定时拉取 · 燃烧速率按最近 5 分钟～6 小时样本估算 · <a href="https://bigmodel.cn/coding-plan/personal/usage" target="_blank">官方用量页（含用量明细/健康度/额度重置/加油包）↗</a></div>
 
   <details class="settings">
     <summary>⚙ 设置（API Key · 刷新频率）</summary>
@@ -418,19 +416,19 @@ function smoothPath(xy) {
   return d;
 }
 function sparkline(pts, color) {
-  if (!pts || pts.length < 2) return "";
-  var W = 230, H = 30, pp = downsample(pts, 90);
+  if (!pts || pts.length < 2) return '<div class="sparkCap"><span>走势将随采样积累显示（本机定时记录已用量）</span></div>';
+  var W = 224, H = 26, pad = 3, pp = downsample(pts, 90);
   var vs = pp.map(function(p){ return p[1]; });
   var t0 = pp[0][0], t1 = pp[pp.length - 1][0], v0 = Math.min.apply(null, vs), v1 = Math.max.apply(null, vs);
   if (v1 === v0) v1 = v0 + 1;
   if (t1 === t0) t1 = t0 + 1;
-  var xy = pp.map(function(p){ return [(p[0] - t0) / (t1 - t0) * W, H - 3 - (p[1] - v0) / (v1 - v0) * (H - 8)]; });
+  var xy = pp.map(function(p){ return [pad + (p[0] - t0) / (t1 - t0) * (W - pad * 2), H - pad - (p[1] - v0) / (v1 - v0) * (H - pad * 2)]; });
   var line = smoothPath(xy);
-  var area = line + " L" + W + "," + (H - 3) + " L0," + (H - 3) + " Z";
-  return '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" style="width:100%;height:30px;overflow:visible">'
-    + '<line class="base" x1="0" y1="' + (H - 3) + '" x2="' + W + '" y2="' + (H - 3) + '"/>'
+  var area = line + " L" + (W - pad) + "," + (H - pad) + " L" + pad + "," + (H - pad) + " Z";
+  return '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" style="width:100%;height:26px;display:block">'
     + '<path d="' + area + '" style="fill:' + color + ';opacity:.12"/>'
-    + '<path d="' + line + '" style="fill:none;stroke:' + color + ';stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round"/></svg>';
+    + '<path d="' + line + '" style="fill:none;stroke:' + color + ';stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round" vector-effect="non-scaling-stroke"/></svg>'
+    + '<div class="sparkCap"><span>近 48 小时已用增长 · 本机采样</span><span>' + pp.length + ' 点</span></div>';
 }
 
 function etaParts(b, rate){
@@ -572,7 +570,7 @@ async function keyStatus() {
       REFRESH = j.refresh_seconds; tick = REFRESH;
       document.getElementById("refreshsel").value = String(j.refresh_seconds);
       document.getElementById("subline").textContent = "每 " + (j.refresh_seconds >= 60 ? (j.refresh_seconds/60) + " 分钟" : j.refresh_seconds + " 秒") + "自动拉取 · 燃烧速率按最近 5 分钟～6 小时样本估算 · ";
-      document.getElementById("subline").insertAdjacentHTML("beforeend", '<a href="https://bigmodel.cn/coding-plan/personal/usage" target="_blank">官方用量页 ↗</a>');
+      document.getElementById("subline").insertAdjacentHTML("beforeend", '<a href="https://bigmodel.cn/coding-plan/personal/usage" target="_blank">官方用量页（含用量明细/健康度/额度重置/加油包）↗</a>');
     }
   } catch (e) {}
 }
