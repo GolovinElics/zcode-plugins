@@ -1,12 +1,12 @@
 {
   "name": "glm-usage",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "skills": "./skills",
   "commands": "./commands",
-  "description": "GLM Coding Plan usage dashboard: in-app panel plus local web UI with 5h/weekly quota gauges, burn rate, ETA and history sparkline.",
+  "description": "GLM usage + ZCode context insight dashboard: quota gauges, burn rate, context stats, context browser, trend, fleet.",
   "description_i18n": {
-    "en": "GLM Coding Plan usage dashboard: in-app panel plus local web UI with 5h/weekly quota gauges, burn rate, ETA and history sparkline.",
-    "zh-CN": "GLM 套餐用量看板：应用内面板 + 本地网页，环形仪表展示 5 小时/每周额度、燃烧速率、触顶预测与历史走势。"
+    "en": "GLM usage + ZCode context insight dashboard: quota gauges, burn rate, context stats, context browser, trend, fleet.",
+    "zh-CN": "GLM 用量 + ZCode 上下文洞察看板：额度仪表、燃烧速率、上下文构成、Context Browser、趋势与 Agent 家族视图。"
   },
   "author": {
     "name": "liangfeng"
@@ -16,6 +16,8 @@
     "coding-plan",
     "usage",
     "quota",
+    "context",
+    "insight",
     "dashboard",
     "bigmodel"
   ],

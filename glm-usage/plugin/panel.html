@@ -886,7 +886,9 @@ function renderInsights() {
   var kpis = [
     { l: "全部会话", v: k.sessions, s: "其中归档 " + k.archived + " 个", dim: false },
     { l: "Token 消耗", v: cnum(k.tokens), s: "轮次 " + k.turns, dim: false },
-    { l: "预估费用", v: "—", s: "配置 prices 后可用", dim: true },
+    k.cost != null
+      ? { l: "预估费用", v: "¥" + (Math.round(k.cost * 100) / 100), s: "已计价 · 按 prices 配置", dim: false }
+      : { l: "预估费用", v: "—", s: "配置 prices 后可用", dim: true },
     { l: "缓存命中", v: k.cache_hit + "%", s: "含 " + k.sessions + " 个会话", dim: false },
     { l: "工具调用", v: k.tool_calls, s: "工具执行 " + durMs(k.tool_ms), dim: false },
     { l: "活跃时长", v: durMs(k.active_ms), s: "模型调用 " + k.steps, dim: false },
@@ -1150,7 +1152,9 @@ function renderContext() {
   // 会话信息卡
   document.getElementById("ctxInfo").innerHTML = [
     ["会话 ID", s.id], ["目录", s.directory], ["模型", s.model || "—"],
-    ["窗口", cnum(s.window) + " tokens"], ["创建", s.created ? new Date(s.created).toLocaleString("zh-CN") : "—"],
+    ["窗口", cnum(s.window) + " tokens"],
+    ["预估费用", s.cost != null ? "≈¥" + (Math.round(s.cost * 100) / 100) : "未配置 prices"],
+    ["创建", s.created ? new Date(s.created).toLocaleString("zh-CN") : "—"],
     ["更新", s.updated ? new Date(s.updated).toLocaleString("zh-CN") : "—"],
     ["归档", s.archived ? "是" : "否"],
   ].map(function (r) { return '<div class="row"><span class="k">' + r[0] + '</span><span class="v" title="' + esc(r[1]) + '">' + esc(r[1]) + "</span></div>"; }).join("");
@@ -1374,7 +1378,7 @@ function agentCard(a, role) {
   var pct = a.window ? Math.round((a.context || 0) / a.window * 1000) / 10 : 0;
   return '<div class="agentCard' + (role === "lead" ? " lead" : "") + '">'
     + '<div class="ah"><span class="ad" style="background:' + color + '"></span><span class="an">' + esc(a.title || a.id) + "</span></div>"
-    + '<div class="am">' + esc(a.model || "—") + " · " + a.steps + " 步 · " + cnum(a.tokens) + " tok</div>"
+    + '<div class="am">' + esc(a.model || "—") + " · " + a.steps + " 步 · " + cnum(a.tokens) + " tok" + (a.cost != null ? " · ≈¥" + (Math.round(a.cost * 100) / 100) : "") + "</div>"
     + '<div class="abar"><i style="width:' + Math.min(pct, 100).toFixed(1) + '%"></i></div>'
     + '<div class="af"><span>Context ' + cnum(a.context) + "</span><span>" + pct + "%</span></div></div>";
 }
@@ -1384,7 +1388,7 @@ function fleetRow(a, role) {
   var letter = (a.title || "?").trim().charAt(0).toUpperCase() || "?";
   var pct = a.window ? Math.round((a.context || 0) / a.window * 1000) / 10 : 0;
   return '<div class="fleetRow"><span class="avatar" style="background:rgb(' + hue + ')">' + esc(letter) + "</span>"
-    + '<div class="fleetInfo"><div class="fn">' + esc(a.title || a.id) + '</div><div class="fm">' + esc(a.model || "—") + " · " + a.steps + " 步 · " + cnum(a.tokens) + " tok · " + durMs(a.model_ms) + "</div></div>"
+    + '<div class="fleetInfo"><div class="fn">' + esc(a.title || a.id) + '</div><div class="fm">' + esc(a.model || "—") + " · " + a.steps + " 步 · " + cnum(a.tokens) + " tok · " + durMs(a.model_ms) + (a.cost != null ? " · ≈¥" + (Math.round(a.cost * 100) / 100) : "") + "</div></div>"
     + '<div class="fleetCtx"><div class="fx"><span>Context ' + cnum(a.context) + "</span><span>" + pct + '%</span></div>'
     + '<div class="bar"><i style="width:' + Math.min(pct, 100).toFixed(1) + '%"></i></div></div></div>';
 }

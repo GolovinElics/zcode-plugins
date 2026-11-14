@@ -36,7 +36,7 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* 回退 CLI 
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PANEL_URI = "ui://glm-usage/panel.html";
-const VERSION = "2.0.0";
+const VERSION = "2.0.1";
 const APP_VERSION = "3.18.2";
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8791"; // 仅当用户自建网页版时提示用，不作为依赖
 
@@ -457,6 +457,13 @@ function priceFor(modelId) {
   return Array.isArray(hit) && hit.length >= 2 ? hit : null;
 }
 
+// 单次调用的费用（¥）：[输入价, 输出价] 元/百万 tokens；未配置价格返回 null（对齐上游"仅计价模型显示费用"）
+function costOf(modelId, inputT, outputT) {
+  const pr = priceFor(modelId);
+  if (!pr) return null;
+  return Math.round(((Number(inputT || 0) * pr[0] + Number(outputT || 0) * pr[1]) / 1e6) * 10000) / 10000;
+}
+
 /* ---------- 时间范围 ---------- */
 
 function rangeStart(range) {
@@ -476,7 +483,13 @@ const _ioCache = new Map(); // file -> { size, mtime, entries: [最新在前，�
 const IO_TAIL_BYTES = 24 * 1024 * 1024; // 单条 entry 可能包含完整上下文，上限放宽
 const IO_CACHE_MS = 4000;
 
+// 会话 ID 仅允许安全字符：既防止 rollout 文件名路径穿越，也收敛 sqlite CLI 回退路径的注入面
+function validSessionId(id) {
+  return typeof id === "string" && /^[A-Za-z0-9_-]{1,120}$/.test(id);
+}
+
 function sessionIoFile(sessionId) {
+  if (!validSessionId(sessionId)) return null;
   const f = path.join(ROLLOUT_DIR, `model-io-${sessionId}.jsonl`);
   return fs.existsSync(f) ? f : null;
 }
@@ -707,6 +720,20 @@ function fetchInsights(range) {
     tps: (ms(k.model_ms) - ms(k.ttft_ms)) > 0 ? Math.round(Number(k.output_t || 0) / ((ms(k.model_ms) - ms(k.ttft_ms)) / 1000)) : 0,
     priced: false, cost: null,
   };
+  // KPI 费用：仅当范围内每个用到的模型都配置了价格时才给出（部分计价会误导，对齐上游 priced-session 口径）
+  {
+    const perModel = q(`SELECT mu.model_id, SUM(mu.input_tokens) input_t, SUM(mu.output_tokens) output_t
+      FROM model_usage mu WHERE ${rng} AND mu.query_source != 'session_title'
+      GROUP BY mu.model_id`, params);
+    let total = 0;
+    const allPriced = perModel.length > 0 && perModel.every((r) => {
+      const c = costOf(r.model_id, r.input_t, r.output_t);
+      if (c == null) return false;
+      total += c;
+      return true;
+    });
+    if (allPriced) { kpis.priced = true; kpis.cost = Math.round(total * 10000) / 10000; }
+  }
 
   // ---- 逐日（活跃度 + 走势） ----
   const daily = q(`SELECT date(mu.started_at/1000,'unixepoch','localtime') day,
@@ -722,7 +749,10 @@ function fetchInsights(range) {
       SUM(mu.cache_read_input_tokens) cache_read, SUM(mu.computed_total_tokens) tokens,
       SUM(mu.duration_ms) model_ms, SUM(mu.time_to_first_token_ms) ttft_ms
     FROM model_usage mu WHERE ${rng} AND mu.query_source != 'session_title'
-    GROUP BY mu.model_id ORDER BY tokens DESC LIMIT 12`, params).map((r) => ({ ...r, tokens: Number(r.tokens || 0) }));
+    GROUP BY mu.model_id ORDER BY tokens DESC LIMIT 12`, params).map((r) => ({
+      ...r, tokens: Number(r.tokens || 0),
+      cost: costOf(r.model_id, r.input_t, r.output_t),
+    }));
 
   // ---- 按工具 ----
   const tools = q(`SELECT tool_name name, COUNT(*) calls, SUM(duration_ms) tool_ms,
@@ -940,7 +970,7 @@ function fetchSessionContext(sessionId) {
       archived: s.time_archived != null, compacting: s.time_compacting != null,
       turns, steps: steps.length, timing, token_sums: sum,
       model: lastModelId, window: windowFor(lastModelId),
-      cost: null, last_msg: lastMsg,
+      cost: costOf(lastModelId, sum.input, sum.output), last_msg: lastMsg,
     },
     stats: {
       user_msgs: Number(userMsgs || 0), answers: Number(answers || 0), skills: Number(skills || 0),
@@ -995,6 +1025,7 @@ function fetchFleet(sessionId) {
       steps: Number(agg.steps || 0), tokens: Number(agg.tokens || 0), model_ms: ms(agg.model_ms),
       context: Number(lastM.computed_total_tokens || 0), window: windowFor(lastM.model_id),
       model: lastM.model_id ? normModel(lastM.model_id) : null,
+      cost: lastM.model_id ? costOf(lastM.model_id, agg.input_t, agg.output_t) : null,
     };
   };
   const kids = q(`SELECT * FROM session WHERE parent_id = ? AND time_deleted IS NULL ORDER BY time_created ASC`, [root.id]).map(member);
@@ -1116,20 +1147,6 @@ async function usageText() {
   return lines.join("\n");
 }
 
-function insightsText(range) {
-  const d = fetchInsights(range);
-  const k = d.kpis;
-  const lines = [];
-  lines.push(`ZCode 本地会话洞察（${range === "all" ? "全部" : range === "today" ? "今天" : range === "7d" ? "近 7 天" : "近 30 天"}）`);
-  lines.push(`  会话 ${k.sessions}（归档 ${k.archived}）· 轮次 ${k.turns} · 步数 ${k.steps} · 工具调用 ${k.tool_calls}`);
-  lines.push(`  Token 总量 ${k.tokens.toLocaleString()}（输入 ${k.input.toLocaleString()} / 输出 ${k.output.toLocaleString()}）· 缓存命中 ${k.cache_hit}%`);
-  lines.push(`  活跃时长 ${Math.round(k.active_ms / 60000)} 分钟 · 输出速度 ${k.tps} tok/s · 错误 ${k.errors} · 取消 ${k.cancels}`);
-  if (d.models.length) lines.push(`  模型：` + d.models.slice(0, 4).map((m) => `${m.model_id}(${Number(m.tokens).toLocaleString()})`).join("、"));
-  if (d.tools.length) lines.push(`  高频工具：` + d.tools.slice(0, 6).map((x) => `${x.name}×${x.calls}`).join("、"));
-  if (d.sessions.length) lines.push(`  最近会话：` + d.sessions.slice(0, 3).map((s) => `《${s.title}》${s.tokens.toLocaleString()}tok`).join("、"));
-  return lines.join("\n");
-}
-
 function defaultSessionId() {
   const r = q(`SELECT id FROM session WHERE time_deleted IS NULL ORDER BY time_updated DESC LIMIT 1`)[0];
   if (!r) throw new Error("本地没有可用会话（db.sqlite 为空）");
@@ -1174,12 +1191,10 @@ async function handleToolCall(name, args) {
       return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }], isError: true };
     }
   }
-  if (name === "get_insights_text") {
-    return { content: [{ type: "text", text: insightsText(args?.range) }] };
-  }
   if (name === "get_session_context") {
     try {
       const sid = args?.session_id || defaultSessionId();
+      if (!validSessionId(sid)) throw new Error("非法的 session_id");
       return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: fetchSessionContext(sid) }) }] };
     } catch (e) {
       return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }], isError: true };
@@ -1188,6 +1203,7 @@ async function handleToolCall(name, args) {
   if (name === "get_context_browser") {
     try {
       const sid = args?.session_id || defaultSessionId();
+      if (!validSessionId(sid)) throw new Error("非法的 session_id");
       return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: fetchContextBrowser(sid, { prev: !!args?.prev }) }) }] };
     } catch (e) {
       return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }], isError: true };
@@ -1196,6 +1212,7 @@ async function handleToolCall(name, args) {
   if (name === "get_fleet") {
     try {
       const sid = args?.session_id || defaultSessionId();
+      if (!validSessionId(sid)) throw new Error("非法的 session_id");
       return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: fetchFleet(sid) }) }] };
     } catch (e) {
       return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }], isError: true };
@@ -1217,7 +1234,7 @@ async function handleToolCall(name, args) {
       has_key: !!key, masked: key ? key.slice(0, 5) + "…" + key.slice(-4) : null,
       source: key ? "key" : "browser_session",
       refresh_seconds: cfg.refresh_seconds, sample_seconds: cfg.sample_seconds,
-      context_windows: cfg.context_windows, prices_configured: Object.keys(cfg.prices || {}).length > 0,
+      context_windows: cfg.context_windows, prices: cfg.prices || {},
       insights_available: dbAvailable(),
     }) }] };
   }
