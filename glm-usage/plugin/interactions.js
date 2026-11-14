@@ -211,6 +211,15 @@ function bootInteractions() {
   document.querySelectorAll('select').forEach(enhanceSelect);
   document.addEventListener('pointermove', e => {
     lastInput = 'pointer';
+    if (hoverElement !== e.target) {
+      hoverElement = e.target; highlightDonut(e.target);
+      const cat = e.target.closest('[data-cat]'); state.hoverCat = cat?.dataset.cat || null;
+      highlightCategory(state.hoverCat || state.catPick, cat?.dataset.item);
+      highlightDay(e.target.closest('[data-day]')?.dataset.day);
+      const step = e.target.closest('[data-step]'); if (step) hoverTrend(step);
+      const agent = e.target.closest('[data-agent]');
+      if (agent || state.agentHover) { state.agentHover = agent?.dataset.agent || null; highlightAgent(); renderAgentInspector(); }
+    }
     const anchor = e.target.closest('[data-tip]'); if (anchor && anchor !== tipAnchor) showTip(anchor);
   });
   document.addEventListener('keydown', () => { lastInput = 'keyboard'; }, true);
@@ -240,9 +249,15 @@ function bootInteractions() {
     const cat = e.target.closest('[data-cat]'); if (cat) { state.hoverCat = cat.dataset.cat; highlightCategory(cat.dataset.cat, cat.dataset.item); }
   });
   document.addEventListener('focusout', e => { highlightDay(null); hideTip(); const wrap = e.target.closest('.donutWrap'); if (wrap) highlightDonut(wrap); state.hoverCat = null; highlightCategory(); });
+  document.addEventListener('wheel', () => { lastInput = 'pointer'; }, { capture: true, passive: true });
+  let scrollFrame = null;
   document.addEventListener('scroll', () => {
     hideTip();
-    if (lastInput === 'keyboard') requestAnimationFrame(() => { const anchor = document.activeElement.closest?.('[data-tip]'); if (anchor) showTip(anchor); });
+    if (scrollFrame !== null) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = null; resetTransientHover();
+      if (lastInput === 'keyboard') { const anchor = document.activeElement.closest?.('[data-tip]'); if (anchor) showTip(anchor); }
+    });
   }, true); window.addEventListener('resize', hideTip);
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && !e.target.closest('dialog[open]')) { hideTip(); state.trendHover = null; state.trendKey = null; updateTrendPick(); state.agentPick = null; state.agentHover = null; highlightAgent(); renderAgentInspector(); document.querySelectorAll('.donutWrap[data-pinned]').forEach(w => { delete w.dataset.pinned; highlightDonut(w); }); } });
   document.addEventListener('click', e => {
@@ -296,4 +311,10 @@ bootInteractions();
 
 function highlightDay(day) {
   document.querySelectorAll('#tab-insights [data-day]').forEach(el => el.classList.toggle('dayHot', !!day && el.dataset.day === day));
+}
+
+function resetTransientHover() {
+  hoverElement = null; state.hoverCat = null; state.trendHover = null; state.agentHover = null;
+  document.querySelectorAll('.donutWrap').forEach(wrap => highlightDonut(wrap));
+  highlightCategory(); highlightDay(null); updateTrendPick(); highlightAgent(); renderAgentInspector();
 }
