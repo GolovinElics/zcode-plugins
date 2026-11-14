@@ -1,0 +1,21 @@
+name: GLM usage validation
+on:
+  pull_request:
+    paths: ['glm-usage/**', 'marketplace.json', '.github/workflows/glm-usage.yml']
+  push:
+    branches: [main]
+    paths: ['glm-usage/**', 'marketplace.json', '.github/workflows/glm-usage.yml']
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '${{ matrix.node }}'
+      - run: node --test glm-usage/tests/*.test.mjs

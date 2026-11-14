@@ -29,6 +29,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import https from "node:https";
 import { execFileSync } from "node:child_process";
+import { panelResource } from './panel-resource.mjs';
+import { categorizeEntry } from './context-composition.mjs';
 
 // node:sqlite（Node ≥22.5 内置）；缺失时回退 sqlite3 CLI，不影响用量工具
 let DatabaseSync = null;
@@ -36,16 +38,16 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* 回退 CLI 
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PANEL_URI = "ui://glm-usage/panel.html";
-const VERSION = "2.4.0";
+const VERSION = "2.5.0";
 const APP_VERSION = "3.18.2";
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8791"; // 仅当用户自建网页版时提示用，不作为依赖
 
 const HOME = os.homedir();
-const ZCODE_DIR = path.join(HOME, ".zcode");
+const ZCODE_DIR = process.env.GLM_ZCODE_DIR || path.join(HOME, ".zcode");
 const CRED_FILE = path.join(ZCODE_DIR, "v2/credentials.json");
 const TELEMETRY_FILE = path.join(ZCODE_DIR, "v2/telemetry-state.json");
 const EMBEDDED_COOKIE_DB = path.join(HOME, "Library/Application Support/ZCode/session/Partitions/zcode-embedded-browser/Cookies");
-const DATA_DIR = path.join(HOME, ".glm-usage");
+const DATA_DIR = process.env.GLM_USAGE_DATA_DIR || path.join(HOME, ".glm-usage");
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 const HISTORY_FILE = path.join(DATA_DIR, "history.json");
 
@@ -533,122 +535,6 @@ function readIoEntries(sessionId, want = 2) {
 
 /* ---------- 上下文构成解析（七类，对标 dsh-context） ---------- */
 
-const IMAGE_TOKEN_EST = 800; // 单张图片的粗估 tokens（无本地分词器）
-const ITEM_PREVIEW = 240;    // 浏览器条目预览长度
-const CAT_ITEMS_CAP = 400;   // 每类条目上限
-
-function textLen(s) { return s ? s.length : 0; }
-
-function blockText(c) {
-  if (!c) return "";
-  if (typeof c === "string") return c;
-  if (Array.isArray(c)) return c.map((p) => (typeof p === "string" ? p : p.text || (p.type === "image" ? "[图片]" : ""))).join("\n");
-  return String(c);
-}
-
-function isSkillInject(text) {
-  if (!text) return false;
-  const head = text.slice(0, 200);
-  return /\bskills?\//.test(head) || /SKILL\.md/.test(head) || /^#+\s*(技能|Skill)/im.test(head);
-}
-
-function pushItem(cat, title, text, opts = {}) {
-  const t = text || "";
-  cat.items.push({
-    title: String(title || "").slice(0, 120),
-    kind: opts.kind || "text",
-    chars: t.length + (opts.extraChars || 0),
-    images: opts.images || 0,
-    preview: t.replace(/\s+/g, " ").slice(0, ITEM_PREVIEW),
-  });
-}
-
-// 把一条 model-io entry 解析为七类构成（items + chars 估算）
-function categorizeEntry(entry) {
-  const body = entry?.request?.body || {};
-  const cats = {
-    system_prompt: { key: "system_prompt", label: "系统提示词", color: "#6366f1", items: [], chars: 0 },
-    tool_schemas: { key: "tool_schemas", label: "工具定义", color: "#f59e0b", items: [], chars: 0 },
-    user_messages: { key: "user_messages", label: "用户消息", color: "#22c55e", items: [], chars: 0 },
-    injected: { key: "injected", label: "注入内容", color: "#a855f7", items: [], chars: 0 },
-    skill: { key: "skill", label: "技能注入", color: "#8b5cf6", items: [], chars: 0 },
-    assistant: { key: "assistant", label: "模型消息", color: "#3b82f6", items: [], chars: 0 },
-    tool_results: { key: "tool_results", label: "工具结果", color: "#14b8a6", items: [], chars: 0 },
-  };
-  // 系统提示词
-  const sys = body.system;
-  if (Array.isArray(sys)) for (const b of sys) pushItem(cats.system_prompt, "系统提示词块", blockText([b]));
-  else if (sys) pushItem(cats.system_prompt, "系统提示词", blockText(sys));
-  cats.system_prompt.chars = cats.system_prompt.items.reduce((a, i) => a + i.chars, 0);
-  // 工具定义（每个工具一项）
-  for (const t of body.tools || []) {
-    const name = t?.name || t?.function?.name || "tool";
-    const schema = JSON.stringify(t);
-    cats.tool_schemas.items.push({ title: name, kind: "schema", chars: schema.length, images: 0, preview: schema.slice(0, ITEM_PREVIEW) });
-  }
-  cats.tool_schemas.chars = cats.tool_schemas.items.reduce((a, i) => a + i.chars, 0);
-  // 消息
-  for (const m of body.messages || []) {
-    const role = m.role;
-    const c = m.content;
-    if (role === "system") {
-      const t = typeof c === "string" ? c : blockText(c);
-      pushItem(isSkillInject(t) ? cats.skill : cats.injected, t.split("\n").find((l) => l.trim())?.slice(0, 60) || "注入块", t);
-      continue;
-    }
-    if (role === "user") {
-      if (typeof c === "string") { pushItem(cats.user_messages, c.slice(0, 60), c); continue; }
-      for (const p of c || []) {
-        if (p.type === "text") pushItem(cats.user_messages, p.text.slice(0, 60), p.text);
-        else if (p.type === "tool_result") {
-          const t = blockText(p.content);
-          pushItem(cats.tool_results, p.tool_use_id ? `结果 ${String(p.tool_use_id).slice(-12)}` : "工具结果", t);
-        } else if (p.type === "image") {
-          cats.user_messages.items.push({ title: "[图片]", kind: "image", chars: 0, images: 1, preview: "[图片附件]" });
-        }
-      }
-      continue;
-    }
-    if (role === "assistant") {
-      if (typeof c === "string") { pushItem(cats.assistant, c.slice(0, 60), c); continue; }
-      for (const p of c || []) {
-        if (p.type === "thinking") pushItem(cats.assistant, "思考块", p.thinking || "", { kind: "thinking" });
-        else if (p.type === "text") pushItem(cats.assistant, p.text.slice(0, 60), p.text, { kind: "answer" });
-        else if (p.type === "tool_use") {
-          const brief = JSON.stringify(p.input || {}).slice(0, 80);
-          cats.assistant.items.push({ title: `调用 ${p.name}`, kind: "tool_use", chars: JSON.stringify(p.input || {}).length + String(p.name).length, images: 0, preview: `${p.name} ${brief}` });
-        }
-      }
-    }
-  }
-  for (const k of Object.keys(cats)) cats[k].chars = cats[k].items.reduce((a, i) => a + i.chars, 0);
-  // 估算 tokens：字符/4 为基准，再按 provider 上报的真实输入等比缩放
-  const usage = entry?.response?.usage || {};
-  const actualInput = Number(usage.inputTokens || usage.input_tokens || 0);
-  const IMG_CHARS_EQ = IMAGE_TOKEN_EST * 4;
-  const rawTotal = Object.values(cats).reduce((a, c) => a + c.chars + c.items.reduce((x, i) => x + i.images * IMG_CHARS_EQ, 0), 0) / 4;
-  const scale = rawTotal > 0 && actualInput > 0 ? actualInput / rawTotal : 1;
-  let running = 0;
-  const order = ["system_prompt", "tool_schemas", "user_messages", "injected", "skill", "assistant", "tool_results"];
-  const out = [];
-  for (const k of order) {
-    const c = cats[k];
-    const imgEq = c.items.reduce((x, i) => x + i.images * IMAGE_TOKEN_EST, 0);
-    const tokens = Math.round((c.chars / 4 + imgEq) * scale);
-    running += tokens;
-    out.push({ ...c, tokens, pct: 0, itemChars: c.chars, items: c.items.slice(0, CAT_ITEMS_CAP), truncated: c.items.length > CAT_ITEMS_CAP });
-  }
-  // 用真实总数校准残差（摊到占比最大的类）
-  const actual = actualInput || running;
-  if (running > 0) {
-    let diff = actual - running;
-    const biggest = out.slice().sort((a, b) => b.tokens - a.tokens)[0];
-    if (biggest && Math.abs(diff) > 0) { biggest.tokens += diff; }
-  }
-  for (const c of out) c.pct = actual > 0 ? Math.round((c.tokens / actual) * 1000) / 10 : 0;
-  return { cats: out, actualInput, actualOutput: Number(usage.outputTokens || usage.output_tokens || 0), total: actualInput + Number(usage.outputTokens || usage.output_tokens || 0), scale };
-}
-
 function liveComposition(sessionId) {
   const entries = readIoEntries(sessionId, 2);
   if (!entries.length) return null;
@@ -662,7 +548,8 @@ function liveComposition(sessionId) {
     cats: cur.cats,
     actual_input: cur.actualInput,
     actual_output: cur.actualOutput,
-    total: cur.actualInput > 0 ? cur.actualInput : cur.total,
+    total: cur.total,
+    estimated: cur.estimated, method: cur.method,
     prev_total: prev && prev.actualInput > 0 ? prev.actualInput : (prev ? prev.total : null),
     request_id: entries[0].requestId || null,
     turn_id: entries[0].turnId || null,
@@ -705,7 +592,8 @@ function fetchInsights(range) {
       SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) errors
     FROM tool_usage tu WHERE ${rng.replace(/mu\./g, "tu.")}`, params)[0] || {};
 
-  const archived = q(`SELECT COUNT(*) n FROM session WHERE time_archived IS NOT NULL AND time_deleted IS NULL`)[0]?.n || 0;
+  const archived = q(`SELECT COUNT(*) n FROM session s WHERE time_archived IS NOT NULL AND time_deleted IS NULL
+    AND EXISTS (SELECT 1 FROM model_usage mu WHERE mu.session_id=s.id AND ${rng} AND mu.query_source != 'session_title')`, params)[0]?.n || 0;
 
   const kpis = {
     sessions: Number(k.sessions || 0), archived,
@@ -739,7 +627,7 @@ function fetchInsights(range) {
   // ---- 逐日（活跃度 + 走势） ----
   const daily = q(`SELECT date(mu.started_at/1000,'unixepoch','localtime') day,
       SUM(mu.computed_total_tokens) tokens, SUM(mu.input_tokens) input_t, SUM(mu.output_tokens) output_t,
-      SUM(mu.cache_read_input_tokens) cache_read, COUNT(*) steps, COUNT(DISTINCT mu.session_id) sessions,
+      SUM(mu.cache_read_input_tokens) cache_read, COUNT(*) steps, COUNT(DISTINCT mu.session_id) sessions, GROUP_CONCAT(DISTINCT mu.session_id) session_ids,
       SUM(mu.duration_ms) model_ms, SUM(mu.time_to_first_token_ms) ttft_ms
     FROM model_usage mu WHERE ${rng} AND mu.query_source != 'session_title'
     GROUP BY day ORDER BY day`, params).map((r) => ({ ...r, tokens: Number(r.tokens || 0), input_t: Number(r.input_t || 0), output_t: Number(r.output_t || 0), cache_read: Number(r.cache_read || 0), steps: Number(r.steps || 0), sessions: Number(r.sessions || 0) }));
@@ -791,25 +679,26 @@ function fetchInsights(range) {
       GROUP BY 1,2 ORDER BY last_at DESC LIMIT 800`, params);
     const agg = new Map();
     for (const r of rows) {
-      const base = path.basename(String(r.f || ""));
-      const e = agg.get(base) || { file: base, full: String(r.f), reads: 0, edits: 0, writes: 0, ops: 0, last_at: 0 };
+      const full = String(r.f || "");
+      const base = path.basename(full);
+      const e = agg.get(full) || { file: base, full: String(r.f), reads: 0, edits: 0, writes: 0, ops: 0, last_at: 0 };
       const op = String(r.tool || "").toLowerCase();
       if (op.includes("read") || op.includes("glob") || op.includes("grep")) e.reads += Number(r.n || 0);
       else if (op.includes("edit")) e.edits += Number(r.n || 0);
       else if (op.includes("write")) e.writes += Number(r.n || 0);
       e.ops += Number(r.n || 0);
       e.last_at = Math.max(e.last_at, Number(r.last_at || 0));
-      agg.set(base, e);
+      agg.set(full, e);
     }
     files = [...agg.values()].sort((a, b) => b.last_at - a.last_at || b.ops - a.ops).slice(0, 20);
   } catch { /* 降级为空 */ }
 
   // ---- 活跃度热力图（固定近 84 天，不受 range 影响；对齐 dsh 12 周热力图） ----
   const heatmap = q(`SELECT date(mu.started_at/1000,'unixepoch','localtime') day,
-      SUM(mu.computed_total_tokens) tokens, COUNT(*) steps
+      SUM(mu.computed_total_tokens) tokens, COUNT(*) steps, GROUP_CONCAT(DISTINCT mu.session_id) session_ids
     FROM model_usage mu
     WHERE mu.started_at >= ? AND mu.query_source != 'session_title'
-    GROUP BY day ORDER BY day`, [Date.now() - 84 * 864e5]).map((r) => ({ day: r.day, tokens: Number(r.tokens || 0), steps: Number(r.steps || 0) }));
+    GROUP BY day ORDER BY day`, [Date.now() - 84 * 864e5]).map((r) => ({ day: r.day, tokens: Number(r.tokens || 0), steps: Number(r.steps || 0), session_ids: r.session_ids || "" }));
 
   // ---- 会话卡片 ----
   const srng = (alias) => (from > 0 ? `AND ${alias}.started_at >= ?` : "");
@@ -821,8 +710,8 @@ function fetchInsights(range) {
       (SELECT SUM(m3.computed_total_tokens) FROM model_usage m3 WHERE m3.session_id = s.id ${srng("m3")}) tokens,
       (SELECT SUM(m4.output_tokens) FROM model_usage m4 WHERE m4.session_id = s.id ${srng("m4")}) output_t,
       (SELECT SUM(m5.duration_ms) FROM model_usage m5 WHERE m5.session_id = s.id ${srng("m5")}) model_ms,
-      (SELECT m6.model_id FROM model_usage m6 WHERE m6.session_id = s.id ORDER BY m6.started_at DESC LIMIT 1) last_model,
-      (SELECT m7.computed_total_tokens FROM model_usage m7 WHERE m7.session_id = s.id ORDER BY m7.started_at DESC LIMIT 1) last_ctx,
+      (SELECT m6.model_id FROM model_usage m6 WHERE m6.session_id = s.id AND m6.query_source != 'session_title' ORDER BY m6.started_at DESC LIMIT 1) last_model,
+      (SELECT m7.input_tokens FROM model_usage m7 WHERE m7.session_id = s.id AND m7.query_source != 'session_title' ORDER BY m7.started_at DESC LIMIT 1) last_ctx,
       (SELECT m8.id FROM message m8 WHERE m8.session_id = s.id AND COALESCE(json_extract(m8.data,'$.metadata.visibility'),'') != 'model-only' ORDER BY m8.time_created DESC LIMIT 1) last_msg_id,
       (SELECT json_extract(m9.data,'$.role') FROM message m9 WHERE m9.session_id = s.id AND COALESCE(json_extract(m9.data,'$.metadata.visibility'),'') != 'model-only' ORDER BY m9.time_created DESC LIMIT 1) last_msg_role
     FROM session s
@@ -867,11 +756,12 @@ function fetchSessionContext(sessionId) {
   const s = q(`SELECT * FROM session WHERE id = ? AND time_deleted IS NULL`, [sessionId])[0];
   if (!s) throw new Error("会话不存在（可能已被删除）");
 
-  const steps = q(`SELECT started_at, completed_at, turn_id, model_id, status, query_source,
+  const steps = q(`SELECT id, started_at, completed_at, turn_id, model_id, status, query_source,
       input_tokens, output_tokens, reasoning_tokens, cache_read_input_tokens, cache_creation_input_tokens,
       computed_total_tokens, duration_ms, time_to_first_token_ms, error_type, finish_reason, attempt_index
     FROM model_usage WHERE session_id = ? AND query_source != 'session_title'
-    ORDER BY started_at ASC LIMIT 600`, [sessionId]).map((r) => ({
+    ORDER BY started_at DESC, id DESC LIMIT 600`, [sessionId]).reverse().map((r) => ({
+    id: r.id,
     ts: Number(r.started_at || 0),
     turn: r.turn_id ? String(r.turn_id).slice(-8) : null,
     model: normModel(r.model_id),
@@ -886,12 +776,12 @@ function fetchSessionContext(sessionId) {
   }));
 
   // 汇总
-  const sum = steps.reduce((a, r) => {
-    a.input += r.input; a.output += r.output; a.cache_read += r.cache_read; a.cache_write += r.cache_write;
-    a.model_ms += r.dur; a.ttft_ms += r.ttft; a.tokens += r.total;
-    if (r.status === "error") a.errors++;
-    return a;
-  }, { input: 0, output: 0, cache_read: 0, cache_write: 0, model_ms: 0, ttft_ms: 0, tokens: 0, errors: 0 });
+  const sumRow = q(`SELECT COUNT(*) steps, SUM(input_tokens) input, SUM(output_tokens) output,
+    SUM(cache_read_input_tokens) cache_read, SUM(cache_creation_input_tokens) cache_write,
+    SUM(duration_ms) model_ms, SUM(time_to_first_token_ms) ttft_ms, SUM(computed_total_tokens) tokens,
+    SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) errors
+    FROM model_usage WHERE session_id = ? AND query_source != 'session_title'`, [sessionId])[0] || {};
+  const sum = Object.fromEntries(Object.entries(sumRow).map(([key, value]) => [key, Number(value || 0)]));
   const tl = q(`SELECT COUNT(*) calls, SUM(duration_ms) tool_ms, SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) errors
     FROM tool_usage WHERE session_id = ?`, [sessionId])[0] || {};
   const timing = {
@@ -969,7 +859,7 @@ function fetchSessionContext(sessionId) {
       id: s.id, title: s.title, directory: s.directory, parent_id: s.parent_id || null,
       created: Number(s.time_created || 0), updated: Number(s.time_updated || 0),
       archived: s.time_archived != null, compacting: s.time_compacting != null,
-      turns, steps: steps.length, timing, token_sums: sum,
+      turns, steps: sum.steps, tokens: sum.tokens, timing, token_sums: sum,
       model: lastModelId, window: windowFor(lastModelId),
       cost: costOf(lastModelId, sum.input, sum.output), last_msg: lastMsg,
     },
@@ -977,10 +867,12 @@ function fetchSessionContext(sessionId) {
       user_msgs: Number(userMsgs || 0), answers: Number(answers || 0), skills: Number(skills || 0),
       injects: Number(injectN || 0), compacts: events.filter((e) => e.type === "compact").length,
       overflows: events.filter((e) => e.type === "overflow").length,
-      tool_calls: toolRows.reduce((a, t) => a + t.count, 0), tools: toolRows,
+      tool_calls: Number(tl.calls || 0), tools: toolRows,
       commands,
     },
     steps,
+    steps_offset: Math.max(0, sum.steps - steps.length),
+    steps_truncated: sum.steps > steps.length,
     events,
     live,
     has_io: !!sessionIoFile(sessionId),
@@ -992,7 +884,8 @@ function fetchContextBrowser(sessionId, opts = {}) {
   const entries = readIoEntries(sessionId, 2);
   if (!entries.length) throw new Error("该会话没有可读的 model-io 记录（可能过旧或被清理）");
   const idx = opts.prev ? 1 : 0;
-  const entry = entries[idx] || entries[0];
+  const entry = entries[idx];
+  if (!entry) throw new Error("没有上一条请求记录");
   const parsed = categorizeEntry(entry);
   const model = normModel(entry?.model?.modelId || entry?.request?.body?.model);
   return {
@@ -1002,6 +895,7 @@ function fetchContextBrowser(sessionId, opts = {}) {
     request_id: entry.requestId || null,
     turn_id: entry.turnId || null,
     actual_input: parsed.actualInput, actual_output: parsed.actualOutput,
+    total: parsed.total, estimated: parsed.estimated, method: parsed.method, has_previous: entries.length > 1,
     cats: parsed.cats,
     messages: (entry.request?.body?.messages || []).length,
     tools: (entry.request?.body?.tools || []).length,
@@ -1010,21 +904,28 @@ function fetchContextBrowser(sessionId, opts = {}) {
 
 function fetchFleet(sessionId) {
   openDb();
-  const root = sessionId
+  let root = sessionId
     ? q(`SELECT * FROM session WHERE id = ?`, [sessionId])[0]
     : q(`SELECT * FROM session WHERE parent_id IS NULL AND time_deleted IS NULL ORDER BY time_updated DESC LIMIT 1`)[0];
   if (!root) throw new Error("没有可用会话");
+  const visited = new Set();
+  while (root.parent_id && !visited.has(root.id)) {
+    visited.add(root.id);
+    const parent = q(`SELECT * FROM session WHERE id = ? AND time_deleted IS NULL`, [root.parent_id])[0];
+    if (!parent) break;
+    root = parent;
+  }
   const member = (row) => {
     const agg = q(`SELECT COUNT(*) steps, SUM(computed_total_tokens) tokens, SUM(duration_ms) model_ms,
         SUM(input_tokens) input_t, SUM(output_tokens) output_t
       FROM model_usage WHERE session_id = ? AND query_source != 'session_title'`, [row.id])[0] || {};
-    const lastM = q(`SELECT model_id, computed_total_tokens FROM model_usage WHERE session_id = ?
-        ORDER BY started_at DESC LIMIT 1`, [row.id])[0] || {};
+    const lastM = q(`SELECT model_id, input_tokens FROM model_usage WHERE session_id = ?
+        AND query_source != 'session_title' ORDER BY started_at DESC LIMIT 1`, [row.id])[0] || {};
     return {
       id: row.id, title: row.title, parent_id: row.parent_id || null,
       created: Number(row.time_created || 0), updated: Number(row.time_updated || 0),
       steps: Number(agg.steps || 0), tokens: Number(agg.tokens || 0), model_ms: ms(agg.model_ms),
-      context: Number(lastM.computed_total_tokens || 0), window: windowFor(lastM.model_id),
+      context: Number(lastM.input_tokens || 0), window: windowFor(lastM.model_id),
       model: lastM.model_id ? normModel(lastM.model_id) : null,
       cost: lastM.model_id ? costOf(lastM.model_id, agg.input_t, agg.output_t) : null,
     };
@@ -1036,11 +937,34 @@ function fetchFleet(sessionId) {
   const inMsg = q(`SELECT COUNT(*) n FROM model_usage WHERE session_id IN (${ph}) AND query_source != 'session_title'`, ids)[0]?.n || 0;
   const inTodos = q(`SELECT COUNT(*) n FROM todo WHERE session_id IN (${ph}) AND status != 'completed'`, ids)[0]?.n || 0;
   const nowMs = Date.now();
-  const running = [root, ...kids].filter((s) => nowMs - Number(s.time_updated || 0) < 3 * 60000).length;
+  const running = [root, ...kids].filter((s) => nowMs - Number(s.time_updated || s.updated || 0) < 3 * 60000).length;
   return {
     lead: member(root), members: kids,
     summary: { agents: ids.length, running, work_items: Number(inTodos || 0), messages: Number(inMsg || 0) },
   };
+}
+
+function fetchActivity(args = {}) {
+  const kind = ["commands", "tools", "files"].includes(args.kind) ? args.kind : "tools";
+  const sid = args.session_id;
+  if (sid && !validSessionId(sid)) throw new Error("非法的 session_id");
+  const from = rangeStart(["today", "7d", "30d", "all"].includes(args.range) ? args.range : "7d");
+  const where = sid ? "tu.session_id = ?" : "tu.started_at >= ?";
+  const params = [sid || from];
+  const cmd = "json_extract(p.data,'$.state.input.command')";
+  const file = "coalesce(json_extract(p.data,'$.state.input.file_path'),json_extract(p.data,'$.state.input.path'))";
+  const filter = kind === "commands" ? `AND ${cmd} IS NOT NULL` : kind === "files" ? `AND ${file} IS NOT NULL` : "";
+  const rows = q(`SELECT tu.id, tu.session_id, tu.tool_name name, tu.status, tu.started_at ts,
+      tu.duration_ms dur, tu.exit_code, tu.error_type, tu.output_bytes,
+      ${cmd} command, ${file} file,
+      json_extract(p.data,'$.state.input.run_in_background') background
+    FROM tool_usage tu LEFT JOIN part p ON p.session_id=tu.session_id AND json_extract(p.data,'$.callID')=tu.tool_call_id
+    WHERE ${where} ${filter} ORDER BY tu.started_at DESC LIMIT 501`, params);
+  return { kind, truncated: rows.length > 500, limit: 500,
+    rows: rows.slice(0, 500).map(r => ({ ...r, ts: Number(r.ts), dur: Number(r.dur || 0),
+      command: r.command ? String(r.command).slice(0, 8000) : null,
+      program: r.command ? String(r.command).trim().split(/[\s;|&]/)[0].replace(/^.*\//, "") : r.name,
+      background: !!r.background })) };
 }
 
 /* ---------- 面板与图标 ---------- */
@@ -1118,6 +1042,18 @@ const TOOLS = [
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
   {
+    name: "get_activity",
+    description: "Read recent local tool, command or file activity. Returns at most 500 execution records for filtering and inspection; never executes commands.",
+    inputSchema: { type: "object", properties: { kind: { type: "string", enum: ["commands", "tools", "files"] }, session_id: { type: "string" }, range: { type: "string", enum: ["today", "7d", "30d", "all"] } }, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: "get_context_item",
+    description: "Read one context item's text from the latest or previous local request. Bounded to 32k characters, read-only.",
+    inputSchema: { type: "object", properties: { session_id: { type: "string" }, item_id: { type: "string" }, prev: { type: "boolean" } }, required: ["session_id", "item_id"], additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+  {
     name: "get_fleet",
     description: "Agent family view for local ZCode sessions: lead session plus its subagent sessions with per-agent token/context usage. Read-only, local.",
     inputSchema: { type: "object", properties: { session_id: { type: "string", description: "Lead session id; defaults to the most recent root session" } }, additionalProperties: false },
@@ -1173,27 +1109,28 @@ function defaultSessionId() {
 }
 
 async function handleToolCall(name, args) {
+  if (name === "get_activity") {
+    try { return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: fetchActivity(args) }) }] }; }
+    catch (e) { return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }], isError: true }; }
+  }
+  if (name === "get_context_item") {
+    try {
+      if (!validSessionId(args.session_id) || typeof args.item_id !== "string" || args.item_id.length > 160) throw new Error("无效的条目标识");
+      const entry = readIoEntries(args.session_id, 2)[args.prev ? 1 : 0];
+      if (!entry) throw new Error("该请求已不可用，请刷新后重试");
+      const data = categorizeEntry(entry, { contentId: args.item_id }).detail;
+      if (!data) throw new Error("上下文已更新，请重新选择条目");
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, data }) }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }] };
+    }
+  }
+
   if (name === "open_dashboard") {
     return { content: [{ type: "text", text: "看板面板已打开" }] };
   }
   if (name === "get_usage_json") {
     return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: await buildUsagePayload() }) }] };
-  }
-  if (name === "get_usage_detail") {
-    try {
-      const days = [1, 7, 30].includes(Number(args?.days)) ? Number(args.days) : 7;
-      return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: await fetchUsageDetail(days) }) }] };
-    } catch (e) {
-      return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }] };
-    }
-  }
-  if (name === "get_health") {
-    try {
-      const days = [1, 7, 30].includes(Number(args?.days)) ? Number(args.days) : 7;
-      return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: await fetchHealth(days) }) }] };
-    } catch (e) {
-      return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }] };
-    }
   }
   if (name === "get_usage") {
     try {
@@ -1336,7 +1273,7 @@ async function dispatch(line) {
             uri: PANEL_URI,
             mimeType: PANEL_MIME,
             _meta: PANEL_META,
-            text: await readFile(join(PLUGIN_ROOT, "panel.html"), "utf8"),
+            text: await panelResource(PLUGIN_ROOT),
           }],
         };
         break;

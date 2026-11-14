@@ -21,7 +21,7 @@ zcode plugins install glm-usage@zcode-plugins
 
 | 插件 | 说明 |
 |---|---|
-| [glm-usage](./glm-usage/) | GLM Coding Plan 用量看板：应用内面板 + 本地网页（5 小时/每周额度、燃烧速率、触顶预测、走势图） |
+| [glm-usage](./glm-usage/) | GLM 用量与 ZCode 上下文洞察：额度、联动图表、分类 / DNA 浏览、请求趋势、活动明细与 Agent 家族 |
 
 > 新增插件：新建 `<插件名>/` 目录（内含 `plugin/` 实体），并在 `marketplace.json` 的 `plugins` 数组加一条 `source: "./<插件名>/plugin"`。
 

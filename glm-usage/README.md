@@ -6,6 +6,24 @@
 
 ## 功能
 
+### v2.5 交互与 ZCode 适配
+
+以 [dsh-context v0.84.1](https://github.com/bowenliang123/dsh-context/releases/tag/v0.84.1)
+的源码和视觉结构为参照，重做交互状态与数据联动：
+
+- **环形图**：图例与扇区双向高亮，中心数值跟随悬浮，点击固定，Esc 取消。
+- **上下文工作区**：左侧构成与趋势，右侧浏览器；分类条、图例、分类行、DNA 分布条保持同一套颜色与高亮语义。
+- **浏览器**：分类、按请求顺序排列的 DNA、按估算 Token 分配的矩形图；搜索、展开、增量显示、最新/上一请求切换；条目支持按需读取内容、前后导航与复制。
+- **请求趋势**：总量/带正负号的输入增量、完整柱位命中区、悬浮提示、固定选择、方向键导航；事件点击定位最近请求。
+- **活动明细**：工具、命令、文件排行可打开明细；汇总格切换全部/失败/后台/超过 5 秒，支持搜索、程序筛选、排序和返回所属会话。只读展示，不执行历史命令。
+- **会话与 Agent**：归档、关键词、日期、完整目录分组筛选；Agent 连线随实际布局重算，节点与成员行双向高亮，可进入对应上下文。
+- **稳定刷新**：保留展开、搜索、焦点、滚动和已选请求；丢弃迟到响应，避免快速切换会话或时间范围后串数据。
+- **可访问性**：键盘操作、明确焦点、提示框避让视口、明暗主题、窄窗口、减少动态偏好。
+
+GLM 的 OpenAI / Anthropic 兼容请求均可解析。输入总量以模型上报为准，分类和条目按字符及图片权重估算并校准；不是逐项 tokenizer 实测值。暂无 provider usage 时明确显示估算值。窗口大小可在 `context_windows` 中覆盖。
+
+完整内容浏览限于日志尾部可读取的最近两次请求；历史趋势展示最近 600 步，统计累计覆盖全部步骤。每类预览最多 400 项，单条内容最多 32,000 字符，活动明细最多 500 条，界面标明截断。ZCode 未提供的独立 Prune 事件显示为不可用，不制造事件数据。
+
 ### 用量（原有能力）
 
 - **Coding Plan**：5 小时窗口 / 每周额度、燃烧速率（单位/小时）、触顶预测、重置倒计时、48 小时走势
@@ -31,7 +49,10 @@
 | 文件/目录 | 说明 |
 |---|---|
 | `server.js` | 零依赖 Node 看板服务（127.0.0.1:8791），LaunchAgent 常驻（仅用量页，v2 面板含全部功能） |
-| `plugin/` | ZCode 插件（应用内四标签面板 + 技能 + 9 个 MCP 工具） |
+| `plugin/` | ZCode 插件（应用内四标签面板 + 技能 + MCP 工具） |
+| `plugin/panel.html` | 页面结构模板，由 MCP 在读取资源时内联 CSS / JS，适配 ZCode 沙箱 |
+| `plugin/charts.js` / `context-browser.js` / `interactions.js` / `activity.js` | 图表、内容浏览、公共交互与活动明细 |
+| `dev/` / `tests/` | 零依赖演示预览、MCP 验证客户端、解析与集成回归测试 |
 | `marketplace.json` | 市场清单（zcode-plugins 仓库根级） |
 | `open-dashboard.applescript` | 独立 App 窗口（Chrome --app 模式）源码 |
 | `config.example.json` | 配置样例（复制为 `config.json` 使用，含 Key 不入库） |
@@ -40,6 +61,30 @@
 
 `open_dashboard` / `get_usage` / `get_usage_json` / `set_coding_key` / `get_config` +
 洞察新增 `get_insights`（range: today/7d/30d/all）、`get_session_context`、`get_context_browser`、`get_fleet`。
+
+v2.5 新增 `get_context_item`（按条目标识读取限长内容）和 `get_activity`（工具/命令/文件执行记录）。两者都是本地只读工具。
+
+## 开发与验证
+
+Node.js 22.5 或更高版本，预览与测试不需要安装 npm 依赖：
+
+```bash
+# 仓库根目录；固定演示数据，不读取本机账号或会话
+node glm-usage/dev/preview.mjs
+# 浏览器打开 http://127.0.0.1:8792
+
+# 解析、600+ 步累计、家族关系、内容读取、资源内联、版本一致性
+node --test glm-usage/tests/*.test.mjs
+
+# 可选：使用 Playwright CLI 复验交互（先保持预览服务运行）
+npx --yes --package @playwright/cli playwright-cli -s=glm-ui open http://127.0.0.1:8792 --browser chrome
+npx --yes --package @playwright/cli playwright-cli -s=glm-ui run-code --filename glm-usage/dev/verify-ui.cjs
+npx --yes --package @playwright/cli playwright-cli -s=glm-ui run-code --filename glm-usage/dev/verify-races.cjs
+```
+
+`GLM_PREVIEW_PORT` 可覆盖预览端口。测试专用的 `GLM_ZCODE_DIR` / `GLM_USAGE_DATA_DIR` 可将 MCP 数据源与配置目录指向隔离夹具；默认仍使用用户的 ZCode 路径。不要把真实会话或凭据放入测试夹具。
+
+参考项目来源与修改范围见 [第三方声明](plugin/THIRD_PARTY_NOTICES.md)。
 
 ## 安装
 
