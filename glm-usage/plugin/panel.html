@@ -158,8 +158,8 @@
   .lineBlock { margin-top:10px; }
   .lineTitle { font-size:11px; color:var(--sub); margin-bottom:4px; }
   .lines svg { width:100%; display:block; }
-  .lineLegend { display:flex; gap:12px; font-size:10.5px; color:var(--dim); margin-top:4px; }
-  .lineLegend i { display:inline-block; width:14px; height:2px; vertical-align:3px; margin-right:4px; }
+  .lineLegend { display:flex; gap:16px; font-size:12px; color:var(--fg); margin-top:4px; margin-bottom:10px; align-items:center; }
+  .lineLegend i { display:inline-block; width:8px; height:8px; border-radius:99px; margin-right:6px; }
   .err { background:color-mix(in srgb,var(--bad) 9%,transparent); border:1px solid color-mix(in srgb,var(--bad) 35%,transparent); color:var(--bad); border-radius:var(--radius-inner); padding:11px 15px; margin-bottom:13px; display:none; font-size:12.5px; }
   .empty { color:var(--dim); text-align:center; padding:36px 0; grid-column:1/-1; }
 </style></head><body>
@@ -496,29 +496,41 @@ document.getElementById("detailTab").addEventListener("click", function (e) {
   renderDetail(); // model/mcp 本地已有，原位补丁
 });
 
-/* ---- 系统健康度（经 MCP 桥调 get_health）---- */
+/* ---- 系统健康度（经 MCP 桥调 get_health；官方风格：Y 轴刻度+网格+X 轴日期，0 基准）---- */
 var healthState = { days: 7, data: null };
-function lineChart(series, xTime, H) {
-  var W = 760, pad = 6, n = xTime.length;
-  var all = [];
-  series.forEach(function (s) { all = all.concat(s.data.filter(function (v) { return v != null; })); });
-  if (!all.length || n < 2) return "";
-  var lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
-  if (hi === lo) hi = lo + 1;
-  function pathOf(data) {
-    var xy = data.map(function (v, i) { return [pad + i / (n - 1) * (W - pad * 2), H - pad - (v - lo) / (hi - lo) * (H - pad * 2)]; });
-    return monotonePath(xy);
+function speedChart(d) {
+  var W = 860, H = 300, padL = 52, padR = 16, padT = 14, padB = 34, n = (d.xTime || []).length;
+  var all = (d.proMax || []).concat(d.lite || []).filter(function (v) { return v != null; });
+  if (!all.length || n < 2) return '<div class="empty" style="padding:24px 0">暂无健康度数据</div>';
+  var hiRaw = Math.max.apply(null, all);
+  var step = 20;
+  var hi = Math.max(step, Math.ceil(hiRaw / step) * step);
+  function y(v) { return padT + (1 - v / hi) * (H - padT - padB); }
+  function x(i) { return padL + i / (n - 1) * (W - padL - padR); }
+  function pathOf(data) { return monotonePath(data.map(function (v, i) { return [x(i), y(v)]; })); }
+  var grid = "";
+  for (var v = 0; v <= hi; v += step) {
+    grid += '<line x1="' + padL + '" y1="' + y(v).toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y(v).toFixed(1) + '" stroke="rgba(128,140,160,.18)" stroke-width="1"/>'
+      + '<text x="' + (padL - 8) + '" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end" style="font:11px var(--mono)" fill="var(--dim)">' + v + '</text>';
   }
-  var out = '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" style="width:100%;height:' + H + 'px;display:block">';
-  series.forEach(function (s) { out += '<path d="' + pathOf(s.data) + '" style="fill:none;stroke:' + s.color + ';stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round" vector-effect="non-scaling-stroke"/>'; });
-  return out + "</svg>";
+  var xTicks = "";
+  var every = Math.max(1, Math.ceil(n / 5));
+  for (var i = 0; i < n; i += every) {
+    xTicks += '<text x="' + x(i).toFixed(1) + '" y="' + (H - padB + 20) + '" text-anchor="middle" style="font:11px var(--mono)" fill="var(--dim)">' + ((d.xTime || [])[i] || "").slice(5, 10) + '</text>';
+  }
+  return '<svg viewBox="0 0 ' + W + " " + H + '" style="width:100%;height:auto;display:block">'
+    + '<text x="' + padL + '" y="' + (padT - 2) + '" style="font:11px sans-serif" fill="var(--dim)">tokens/s</text>'
+    + grid
+    + '<path d="' + pathOf(d.proMax || []) + '" fill="none" stroke="#4082F5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+    + '<path d="' + pathOf(d.lite || []) + '" fill="none" stroke="#FF8E42" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+    + xTicks + "</svg>";
 }
 function ensureHealthSkeleton(body) {
   if (body.dataset.built === "1") return;
-  body.innerHTML = '<div class="lineBlock"><div class="lineTitle">平均 Decode 速度（token/s）</div><div class="lines" id="hSpeed"></div>'
-    + '<div class="lineLegend"><span><i style="background:#4082F5"></i>Max&Pro</span><span><i style="background:#FF8E42"></i>Lite</span><span id="hRange"></span></div></div>'
-    + '<div class="lineBlock"><div class="lineTitle">请求成功率</div><div class="lines" id="hOk"></div>'
-    + '<div class="lineLegend"><span><i style="background:#4082F5"></i>Max&Pro</span><span><i style="background:#FF8E42"></i>Lite</span></div></div>';
+  body.innerHTML = '<div class="lineLegend" style="margin:0 0 6px">'
+    + '<span><i style="background:#4082F5;border-radius:99px;height:8px;width:8px"></i>Max&Pro 高峰期平均 Decode 速度</span>'
+    + '<span><i style="background:#FF8E42;border-radius:99px;height:8px;width:8px"></i>Lite 高峰期平均 Decode 速度</span>'
+    + '</div><div id="hSpeed"></div>';
   body.dataset.built = "1";
 }
 function renderHealth() {
@@ -530,24 +542,7 @@ function renderHealth() {
   var sigS = d.xTime.join(",") + "|" + d.proMax.join(",") + "|" + d.lite.join(",");
   if (speed.dataset.sig !== sigS) {
     speed.dataset.sig = sigS;
-    speed.innerHTML = lineChart([
-      { data: d.proMax, color: "#4082F5" },
-      { data: d.lite, color: "#FF8E42" },
-    ], d.xTime, 110);
-    document.getElementById("hRange").textContent = ((d.xTime || [])[0] || "") + " ~ " + ((d.xTime || []).slice(-1)[0] || "");
-  }
-  var ok = document.getElementById("hOk");
-  var sigO = d.proMaxOk.join(",") + "|" + d.liteOk.join(",");
-  if (ok.dataset.sig !== sigO) {
-    ok.dataset.sig = sigO;
-    var lo = 0.9, hi = 1, W = 760, pad = 6, H2 = 90, n = d.xTime.length;
-    function pathOk(data) {
-      var xy = data.map(function (v, i) { return [pad + i / (n - 1) * (W - pad * 2), H2 - pad - (Math.max(v, lo) - lo) / (hi - lo) * (H2 - pad * 2)]; });
-      return monotonePath(xy);
-    }
-    ok.innerHTML = '<svg viewBox="0 0 ' + W + " " + H2 + '" preserveAspectRatio="none" style="width:100%;height:' + H2 + 'px;display:block">'
-      + '<path d="' + pathOk(d.proMaxOk) + '" style="fill:none;stroke:#4082F5;stroke-width:1.8;stroke-linecap:round" vector-effect="non-scaling-stroke"/>'
-      + '<path d="' + pathOk(d.liteOk) + '" style="fill:none;stroke:#FF8E42;stroke-width:1.8;stroke-linecap:round" vector-effect="non-scaling-stroke"/></svg>';
+    speed.innerHTML = speedChart(d);
   }
 }
 async function loadHealth() {

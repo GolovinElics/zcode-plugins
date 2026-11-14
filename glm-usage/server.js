@@ -451,8 +451,8 @@ const HTML = `<!doctype html>
   .hint { font-size:10.5px; color:var(--faint); font-weight:400; }
   .lines svg { width:100%; height:110px; display:block; }
   .lines polyline { fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
-  .lineLegend { display:flex; gap:12px; font-size:10.5px; color:var(--dim); margin-top:4px; }
-  .lineLegend i { display:inline-block; width:14px; height:2px; vertical-align:3px; margin-right:4px; }
+  .lineLegend { display:flex; gap:16px; font-size:12px; color:var(--fg); margin-top:4px; margin-bottom:10px; align-items:center; }
+  .lineLegend i { display:inline-block; width:8px; height:8px; border-radius:99px; margin-right:6px; }
   .lineBlock { margin-top:10px; }
   .lineTitle { font-size:11px; color:var(--sub); margin-bottom:4px; }
   .plan h3 { font-size:13px; font-weight:650; display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:1px; }
@@ -836,28 +836,43 @@ document.getElementById("detailTab").addEventListener("click", function (e) {
 
 /* ---- 系统健康度（官方 model-performance-day）---- */
 var healthState = { days: 7, data: null };
-function lineChart(series, xTime) {
-  var W = 760, H = 110, pad = 6, n = xTime.length;
-  var all = [];
-  series.forEach(function (s) { all = all.concat(s.data.filter(function (v) { return v != null; })); });
-  if (!all.length || n < 2) return "";
-  var lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
-  if (hi === lo) hi = lo + 1;
-  function pathOf(data) {
-    var xy = data.map(function (v, i) { return [pad + i / (n - 1) * (W - pad * 2), H - pad - (v - lo) / (hi - lo) * (H - pad * 2)]; });
-    return monotonePath(xy);
+/* 官方风格速度图：Y 轴刻度 + 网格线 + X 轴日期 + 上方图例（0 基准，刻度取 20 的倍数） */
+function speedChart(d) {
+  var W = 860, H = 300, padL = 52, padR = 16, padT = 14, padB = 34, n = (d.xTime || []).length;
+  var all = (d.proMax || []).concat(d.lite || []).filter(function (v) { return v != null; });
+  if (!all.length || n < 2) return '<div class="empty" style="padding:24px 0">暂无健康度数据</div>';
+  var hiRaw = Math.max.apply(null, all);
+  var step = 20;
+  var hi = Math.max(step, Math.ceil(hiRaw / step) * step);
+  var ticks = [];
+  for (var v = 0; v <= hi; v += step) ticks.push(v);
+  function y(v) { return padT + (1 - v / hi) * (H - padT - padB); }
+  function x(i) { return padL + i / (n - 1) * (W - padL - padR); }
+  function pathOf(data) { return monotonePath(data.map(function (v, i) { return [x(i), y(v)]; })); }
+  var grid = ticks.map(function (t) {
+    return '<line x1="' + padL + '" y1="' + y(t).toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y(t).toFixed(1) + '" stroke="rgba(128,140,160,.18)" stroke-width="1"/>'
+      + '<text x="' + (padL - 8) + '" y="' + (y(t) + 4).toFixed(1) + '" text-anchor="end" style="font:11px var(--mono)" fill="var(--dim)">' + t + '</text>';
+  }).join("");
+  var xTicks = [];
+  var every = Math.max(1, Math.ceil(n / 5));
+  for (var i = 0; i < n; i += every) {
+    xTicks.push('<text x="' + x(i).toFixed(1) + '" y="' + (H - padB + 20) + '" text-anchor="middle" style="font:11px var(--mono)" fill="var(--dim)">' + ((d.xTime || [])[i] || "").slice(5, 10) + '</text>');
   }
-  var out = '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" style="width:100%;height:110px;display:block">';
-  series.forEach(function (s, si) { out += '<path d="' + pathOf(s.data) + '" style="fill:none;stroke:' + s.color + ';stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round" vector-effect="non-scaling-stroke"/>'; });
-  out += "</svg>";
+  var out = '<svg viewBox="0 0 ' + W + " " + H + '" style="width:100%;height:auto;display:block">'
+    + '<text x="' + padL + '" y="' + (padT - 2) + '" style="font:11px sans-serif" fill="var(--dim)">tokens/s</text>'
+    + grid
+    + '<path d="' + pathOf(d.proMax || []) + '" fill="none" stroke="#4082F5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+    + '<path d="' + pathOf(d.lite || []) + '" fill="none" stroke="#FF8E42" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'
+    + xTicks.join("")
+    + "</svg>";
   return out;
 }
 function ensureHealthSkeleton(body) {
   if (body.dataset.built === "1") return;
-  body.innerHTML = '<div class="lineBlock"><div class="lineTitle">平均 Decode 速度（token/s）</div><div class="lines" id="hSpeed"></div>'
-    + '<div class="lineLegend"><span><i style="background:#4082F5"></i>Max&Pro</span><span><i style="background:#FF8E42"></i>Lite</span><span id="hRange"></span></div></div>'
-    + '<div class="lineBlock"><div class="lineTitle">请求成功率</div><div class="lines" id="hOk"></div>'
-    + '<div class="lineLegend"><span><i style="background:#4082F5"></i>Max&Pro</span><span><i style="background:#FF8E42"></i>Lite</span></div></div>';
+  body.innerHTML = '<div class="lineLegend" style="margin:0 0 6px">'
+    + '<span><i style="background:#4082F5;border-radius:99px;height:8px;width:8px"></i>Max&Pro 高峰期平均 Decode 速度</span>'
+    + '<span><i style="background:#FF8E42;border-radius:99px;height:8px;width:8px"></i>Lite 高峰期平均 Decode 速度</span>'
+    + '</div><div id="hSpeed"></div>';
   body.dataset.built = "1";
 }
 function renderHealth() {
@@ -869,28 +884,7 @@ function renderHealth() {
   var sigS = d.xTime.join(",") + "|" + d.proMax.join(",") + "|" + d.lite.join(",");
   if (speed.dataset.sig !== sigS) {
     speed.dataset.sig = sigS;
-    speed.innerHTML = lineChart([
-      { data: d.proMax, color: "#4082F5" },
-      { data: d.lite, color: "#FF8E42" },
-    ], d.xTime);
-    document.getElementById("hRange").textContent = ((d.xTime || [])[0] || "") + " ~ " + ((d.xTime || []).slice(-1)[0] || "");
-  }
-  var ok = document.getElementById("hOk");
-  var sigO = d.proMaxOk.join(",") + "|" + d.liteOk.join(",");
-  if (ok.dataset.sig !== sigO) {
-    ok.dataset.sig = sigO;
-    // 成功率都接近 1，拉开纵轴：以 0.9 为底
-    var lo = 0.9, hi = 1, W = 760, pad = 6, n = d.xTime.length;
-    function pathOf(data) {
-      var xy = data.map(function (v, i) { return [pad + i / (n - 1) * (W - pad * 2), H2 - pad - (Math.max(v, lo) - lo) / (hi - lo) * (H2 - pad * 2)]; });
-      return monotonePath(xy);
-    }
-    var H2 = 90;
-    var out = '<svg viewBox="0 0 ' + W + " " + H2 + '" preserveAspectRatio="none" style="width:100%;height:90px;display:block">';
-    out += '<path d="' + pathOf(d.proMaxOk) + '" style="fill:none;stroke:#4082F5;stroke-width:1.8;stroke-linecap:round" vector-effect="non-scaling-stroke"/>';
-    out += '<path d="' + pathOf(d.liteOk) + '" style="fill:none;stroke:#FF8E42;stroke-width:1.8;stroke-linecap:round" vector-effect="non-scaling-stroke"/>';
-    out += "</svg>";
-    ok.innerHTML = out;
+    speed.innerHTML = speedChart(d);
   }
 }
 async function loadHealth() {
