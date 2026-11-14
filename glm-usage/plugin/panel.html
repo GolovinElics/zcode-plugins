@@ -464,6 +464,13 @@
   .fleetCtx .bar i { display:block; height:100%; border-radius:var(--radius-full); background:#3b82f6; }
   .fleetCtx .fx { font-size:10.5px; color:var(--dim); font-family:var(--mono); display:flex; justify-content:space-between; font-variant-numeric:tabular-nums; }
   .settings input[type="password"] { background:var(--bg); border:1px solid var(--bd); color:var(--fg); border-radius:8px; padding:5px 10px; width:250px; font:12px var(--mono); }
+  /* 无障碍：减少动态偏好下关闭全部动画（吸收自 v1.5.0） */
+  @media (prefers-reduced-motion: reduce) {
+    .enter, .bars > div, .item .ib > i, .metric .mv, .hSpeed path, .segArc, .dailyChart .col,
+    .meter > i, .stackBar i, .themeBtn svg, .themeBtn .rays line, .themeBtn .maskC, .abar i, .fleetCtx .bar i {
+      animation:none !important; transition:none !important;
+    }
+  }
 </style></head><body>
 <div class="wrap">
   <div class="top">
