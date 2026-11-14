@@ -357,7 +357,7 @@ document.getElementById("sessSearch").addEventListener("input", function (ev) {
 });
 function ensureInsights() {
   if (!state.insights || Date.now() - state.insightsAt > 60000) loadInsights();
-  else renderInsights();
+  else { renderInsights(); renderSessions(); }
 }
 var requestTickets = { insights: 0, context: 0, browser: 0, fleet: 0 };
 var inFlight = {};
@@ -678,7 +678,7 @@ function renderDetail() {
   }
   document.getElementById("dT0").textContent = ((sec.xTime || [])[0] || "").slice(5, 10);
   document.getElementById("dT1").textContent = ((sec.xTime || []).slice(-1)[0] || "").slice(5, 10);
-  document.getElementById("dGran").textContent = "按" + (sec.granularity === "HOUR" ? "小时" : sec.granularity);
+  document.getElementById("dGran").textContent = "按" + (sec.granularity === "HOUR" ? "小时" : sec.granularity === "DAY" ? "天" : sec.granularity);
   var top = sec.items && sec.items[0] ? sec.items[0].total || 1 : 1;
   var items = (sec.items || []).slice(0, 8).map(function (it) {
     return '<div class="item"><span class="in" title="' + esc(it.name) + '">' + esc(it.name) + "</span>"
@@ -718,39 +718,10 @@ document.getElementById("detailTab").addEventListener("click", function (e) {
 
 /* ---- 系统健康度（官方 model-performance-day；0 基准网格 + 日期轴）---- */
 var healthState = { days: 7, data: null }, healthTicket = 0;
-function speedChart(d) {
-  var W = 860, H = 320, padL = 56, padR = 20, padT = 30, padB = 48, n = (d.xTime || []).length;
-  var all = (d.proMax || []).concat(d.lite || []).filter(function (v) { return v != null; });
-  if (!all.length || n < 2) return '<div class="empty" style="padding:24px 0">暂无健康度数据</div>';
-  var hiRaw = Math.max.apply(null, all);
-  var step = 20;
-  var hi = Math.max(step, Math.ceil(hiRaw / step) * step);
-  var plotB = H - padB;
-  function y(v) { return padT + (1 - v / hi) * (plotB - padT); }
-  function x(i) { return padL + i / (n - 1) * (W - padL - padR); }
-  function pathOf(data) { return monotonePath(data.map(function (v, i) { return [x(i), y(v)]; })); }
-  var svg = '<text x="' + padL + '" y="14" style="font:11px sans-serif" fill="var(--dim)">tokens/s</text>';
-  for (var v = 0; v <= hi; v += step) {
-    svg += '<line x1="' + padL + '" y1="' + y(v).toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y(v).toFixed(1) + '" stroke="rgba(128,140,160,.18)" stroke-width="1"/>'
-      + '<text x="' + (padL - 12) + '" y="' + (y(v) + 4).toFixed(1) + '" text-anchor="end" style="font:11px var(--mono)" fill="var(--dim)">' + v + '</text>';
-  }
-  var every = Math.max(1, Math.ceil(n / 5));
-  for (var i = 0; i < n; i += every) {
-    svg += '<text x="' + x(i).toFixed(1) + '" y="' + (plotB + 24) + '" text-anchor="middle" style="font:11px var(--mono)" fill="var(--dim)">' + ((d.xTime || [])[i] || "").slice(5, 10) + '</text>';
-  }
-  if ((n - 1) % every !== 0) {
-    svg += '<text x="' + (W - padR) + '" y="' + (plotB + 24) + '" text-anchor="end" style="font:11px var(--mono)" fill="var(--dim)">' + ((d.xTime || [])[n - 1] || "").slice(5, 10) + '</text>';
-  }
-  svg += '<path d="' + pathOf(d.proMax || []) + '" fill="none" stroke="#4082F5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1" class="drawLine"/>'
-    + '<path d="' + pathOf(d.lite || []) + '" fill="none" stroke="#FF8E42" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1" class="drawLine"/>';
-  return '<svg class="hSpeed" viewBox="0 0 ' + W + " " + H + '" style="width:100%;height:auto;display:block">' + svg + "</svg>";
-}
+function speedChart(d) { return healthChart(d, { escape: esc, curve: monotonePath }); }
 function ensureHealthSkeleton(body) {
-  if (body.dataset.built === "1" && body.querySelector(".metrics, .lineLegend")) return;
-  body.innerHTML = '<div class="lineLegend" style="margin:0 0 6px">'
-    + '<span><i style="background:#4082F5;border-radius:99px;height:8px;width:8px"></i>Max&Pro 高峰期平均 Decode 速度</span>'
-    + '<span><i style="background:#FF8E42;border-radius:99px;height:8px;width:8px"></i>Lite 高峰期平均 Decode 速度</span>'
-    + '</div><div id="hSpeed"></div>';
+  if (body.dataset.built === "1" && body.querySelector('.healthSummary')) return;
+  body.innerHTML = '<div class="healthSummary" id="healthSummary"></div><div class="healthChartCaption">高峰期平均解码速度 <span>tokens/s</span></div><div id="hSpeed"></div><div class="healthFoot" id="healthFoot"></div>';
   body.dataset.built = "1";
 }
 function renderHealth() {
@@ -758,6 +729,12 @@ function renderHealth() {
   if (!healthState.data) return;
   var d = healthState.data;
   ensureHealthSkeleton(body);
+  var last = Math.max(0, (d.xTime || []).length - 1);
+  patchHTML('healthSummary', [['Max / Pro', d.proMax?.[last], '#4082f5'], ['Lite', d.lite?.[last], '#ff8e42']].map(function (row) {
+    var value = row[1] != null && Number.isFinite(Number(row[1])) ? Number(row[1]).toFixed(1) : '—';
+    return '<div class="metric"><div class="mk"><i style="background:' + row[2] + '"></i>' + row[0] + '</div><div class="mv">' + value + ' <small>tok/s</small></div></div>';
+  }).join(''));
+  document.getElementById('healthFoot').textContent = '官方每日快照' + (d.xTime?.length ? ' · 最新 ' + d.xTime[last] : '');
   var speed = document.getElementById("hSpeed");
   var sigS = d.xTime.join(",") + "|" + d.proMax.join(",") + "|" + d.lite.join(",");
   if (speed.dataset.sig !== sigS) {

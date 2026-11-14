@@ -719,3 +719,38 @@ button.barRow:hover, button.fileRow:hover { background:var(--card2); }
 .brCat.open .brFold { visibility:visible; transition:grid-template-rows .22s var(--ease); }
 
 dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self:center; flex:none; margin-top:8px; max-width:100%; }
+
+/* Compact official usage + health. Chart text lives outside the scalable SVG. */
+.usageDetails { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; margin-top:14px; align-items:stretch; }
+.usageDetails > .detail { margin-top:0; min-width:0; }
+.usageDetails .detailHead { gap:6px; min-height:25px; margin-bottom:12px; }
+.usageDetails .detailHead h3 { font-size:13px; font-weight:650; }
+.usageDetails .seg button { padding:4px 8px; font-size:10.5px; }
+.usageDetails .metrics { grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; }
+.usageDetails .metric { padding:8px; min-width:0; border-radius:7px; }
+.usageDetails .metric .mv { font-size:14px; line-height:1.4; white-space:nowrap; }
+.usageDetails .metric .mk { font-size:10px; }
+.usageDetails .bars { height:100px; }
+.usageDetails .items { gap:7px; margin-top:10px; }
+.usageDetails .item .in { width:100px; font-size:10.5px; }
+.usageDetails .item .iv { width:75px; font-size:10.5px; }
+.healthSummary { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:10px; }
+.healthSummary .mk { display:flex; align-items:center; gap:5px; margin-bottom:3px; }
+.healthSummary .mk i { width:7px; height:7px; border-radius:50%; flex:none; }
+.healthSummary small { color:var(--dim); font:10px inherit; font-weight:400; }
+.healthChartCaption { display:flex; justify-content:space-between; color:var(--dim); font-size:10px; margin-bottom:8px; }
+.healthChart { display:grid; grid-template-columns:30px minmax(0,1fr); grid-template-rows:148px 22px; column-gap:6px; }
+.healthYAxis { grid-area:1/1; position:relative; color:var(--dim); font:9.5px/1 var(--mono); }
+.healthYAxis span { position:absolute; right:0; transform:translateY(50%); white-space:nowrap; }
+.healthPlot { grid-area:1/2; min-width:0; position:relative; }
+.healthPlot .hSpeed { width:100%; height:148px; display:block; overflow:visible; }
+.healthGrid { stroke:var(--bd); stroke-width:.7; }
+.healthXAxis { grid-area:2/2; position:relative; color:var(--dim); font:9.5px/1.2 var(--mono); margin-top:7px; }
+.healthXAxis span { position:absolute; transform:translateX(-50%); white-space:nowrap; }
+.healthXAxis .first { transform:none; }.healthXAxis .last { transform:translateX(-100%); }
+.healthHits { position:absolute; inset:0; }
+.healthPoint { position:absolute; height:100%; top:0; padding:0; border:0; border-radius:0; background:transparent; }
+.healthPoint:hover, .healthPoint:focus-visible { background:color-mix(in srgb,var(--acc) 6%,transparent); }
+.healthFoot { color:var(--dim); font-size:10px; margin-top:8px; }
+@media(max-width:900px) { .usageDetails { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:460px) { .usageDetails .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
