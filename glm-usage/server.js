@@ -220,6 +220,35 @@ async function fetchUsageDetail(days = 7) {
   return data;
 }
 
+/* ---------- 官方系统健康度（model-performance-day：Decode 速度 + 成功率） ---------- */
+
+let healthCache = { at: 0, days: 0, data: null };
+async function fetchHealth(days = 7) {
+  days = [1, 7, 30].includes(days) ? days : 7;
+  if (healthCache.data && healthCache.days === days && Date.now() - healthCache.at < 5 * 60 * 1000) {
+    return healthCache.data;
+  }
+  const apiKey = configuredApiKey();
+  const token = apiKey || loadCodingPlanToken();
+  const url = "https://open.bigmodel.cn/api/monitor/usage/model-performance-day?" +
+    new URLSearchParams({
+      startTime: fmtLocalDayHour(new Date(Date.now() - days * 86400 * 1000)),
+      endTime: fmtLocalDayHour(new Date()),
+    }).toString();
+  const json = await httpsGetJson(url, { Authorization: token });
+  if (!json.success) throw new Error(json.msg || `health code=${json.code}`);
+  const d = json.data || {};
+  const data = {
+    xTime: d.x_time || [],
+    lite: d.liteDecodeSpeed || [],
+    proMax: d.proMaxDecodeSpeed || [],
+    liteOk: d.liteSuccessRate || [],
+    proMaxOk: d.proMaxSuccessRate || [],
+  };
+  healthCache = { at: Date.now(), days, data };
+  return data;
+}
+
 /* ---------- 历史采样与速率 ---------- */
 
 function readHistory() {
@@ -417,6 +446,13 @@ const HTML = `<!doctype html>
   .item .ib > i { display:block; height:100%; border-radius:99px; background:var(--acc); }
   .item .iv { width:90px; text-align:right; font:500 11.5px var(--mono); color:var(--sub); font-variant-numeric:tabular-nums; }
   .detail .err2 { color:var(--bad); font-size:12px; padding:8px 0; }
+  .hint { font-size:10.5px; color:var(--faint); font-weight:400; }
+  .lines svg { width:100%; height:110px; display:block; }
+  .lines polyline { fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+  .lineLegend { display:flex; gap:12px; font-size:10.5px; color:var(--dim); margin-top:4px; }
+  .lineLegend i { display:inline-block; width:14px; height:2px; vertical-align:3px; margin-right:4px; }
+  .lineBlock { margin-top:10px; }
+  .lineTitle { font-size:11px; color:var(--sub); margin-bottom:4px; }
   .plan h3 { font-size:13px; font-weight:650; display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:1px; }
   .plan .life { font-size:11px; color:var(--faint); margin-bottom:10px; }
   .badge { font-size:10.5px; padding:1px 8px; border-radius:var(--radius-full); border:1px solid var(--bd); color:var(--dim); font-weight:500; }
@@ -466,7 +502,17 @@ const HTML = `<!doctype html>
         <button data-t="model" class="on">模型</button><button data-t="mcp">工具</button>
       </div>
     </div>
-    <div id="detailBody"><div class="empty" style="padding:18px 0">加载中…</div></div>
+    <div id="detailBody"></div>
+  </section>
+
+  <section class="card detail enter" id="healthCard" style="--delay:220ms">
+    <div class="detailHead">
+      <h3>系统健康度 <span class="hint">官方每日快照 · 高峰期优先保障 Max/Pro 的 Decode 速度</span></h3>
+      <div class="seg" id="healthDays">
+        <button data-d="1">今天</button><button data-d="7" class="on">7 天</button><button data-d="30">30 天</button>
+      </div>
+    </div>
+    <div id="healthBody"></div>
   </section>
   <div class="footer">GLM Usage Dashboard · 本地服务 127.0.0.1:8791 · 历史采样保留 48 小时 · /glm-usage 随时唤起</div>
 </div>
@@ -707,44 +753,60 @@ async function saveRefresh(v) {
   if (j.ok) { REFRESH = Number(v); tick = REFRESH; schedule(); keyStatus(); }
 }
 
-/* ---- 使用详情（官方 token-usage/usage-detail 数据）---- */
+/* ---- 使用详情（官方 token-usage/usage-detail 数据；骨架一次构建，切换只打补丁不闪屏）---- */
 var detailState = { days: 7, tab: "model", data: null };
 function fmtTokD(n) {
   if (n >= 1e8) return (n / 1e8).toFixed(2) + " 亿";
   if (n >= 1e4) return (n / 1e4).toFixed(1) + " 万";
   return String(Math.round(n));
 }
+function ensureDetailSkeleton(body) {
+  if (body.dataset.built === "1") return;
+  body.innerHTML = '<div class="metrics">'
+    + '<div class="metric"><div class="mv" id="dTtl">—</div><div class="mk">总量 token</div></div>'
+    + '<div class="metric"><div class="mv" id="dDly">—</div><div class="mk">日均 token</div></div>'
+    + '<div class="metric"><div class="mv" id="dCh">—</div><div class="mk">缓存命中</div></div>'
+    + '<div class="metric"><div class="mv" id="dPk">—</div><div class="mk">峰时占比</div></div>'
+    + "</div>"
+    + '<div class="bars" id="dBars"></div>'
+    + '<div class="barAxis"><span id="dT0"></span><span id="dT1"></span></div>'
+    + '<div class="legend"><span><i style="background:var(--acc)"></i>谷时</span><span><i style="background:var(--mid)"></i>峰时</span><span id="dGran"></span></div>'
+    + '<div class="items" id="dItems"></div>';
+  body.dataset.built = "1";
+}
 function renderDetail() {
   var body = document.getElementById("detailBody");
-  var d = detailState.data;
-  if (!d) { body.innerHTML = '<div class="empty" style="padding:18px 0">加载中…</div>'; return; }
-  var sec = d[detailState.tab];
-  if (!sec) { body.innerHTML = '<div class="empty" style="padding:18px 0">无数据</div>'; return; }
-  if (sec.error) { body.innerHTML = '<div class="err2">⚠ ' + esc(sec.error) + "</div>"; return; }
+  if (!detailState.data) return; // 无数据时保持现状（可能还是上一次的内容），后台取数后补丁
+  var sec = detailState.data[detailState.tab];
+  if (!sec || sec.error) return;
   var s = sec.summary || {}, max = Math.max.apply(null, [1].concat(sec.totals || []));
+  ensureDetailSkeleton(body);
+  document.getElementById("dTtl").textContent = fmtTokD(s.total);
+  document.getElementById("dDly").textContent = fmtTokD(s.daily);
+  document.getElementById("dCh").textContent = (s.cacheHit * 100).toFixed(1) + "%";
+  document.getElementById("dPk").textContent = (s.peakRate * 100).toFixed(0) + "%";
   var bars = (sec.totals || []).map(function (v, i) {
     var h = Math.max(2, Math.round(v / max * 84));
     var peak = (sec.periodTypes || [])[i] === "PEAK";
     var t = (sec.xTime || [])[i] || "";
-    return '<i class="' + (peak ? "peak" : "") + '" style="height:' + h + 'px" title="' + esc(t.slice(5, 16)) + " · " + fmtTokD(v) + ' token' + (peak ? " · 峰时" : " · 谷时") + '"></i>';
+    return '<div class="' + (peak ? "peak" : "") + '" style="height:' + h + 'px" title="' + esc(t.slice(5, 16)) + " · " + fmtTokD(v) + ' token' + (peak ? " · 峰时" : " · 谷时") + '"></div>';
   }).join("");
+  var barsEl = document.getElementById("dBars");
+  if (barsEl.dataset.sig !== sec.totals.join(",")) {
+    barsEl.dataset.sig = sec.totals.join(",");
+    barsEl.innerHTML = bars;
+  }
+  document.getElementById("dT0").textContent = ((sec.xTime || [])[0] || "").slice(5, 10);
+  document.getElementById("dT1").textContent = ((sec.xTime || []).slice(-1)[0] || "").slice(5, 10);
+  document.getElementById("dGran").textContent = "按" + (sec.granularity === "HOUR" ? "小时" : sec.granularity);
+  var top = sec.items && sec.items[0] ? sec.items[0].total || 1 : 1;
   var items = (sec.items || []).slice(0, 8).map(function (it) {
-    var top = sec.items[0] ? sec.items[0].total || 1 : 1;
     return '<div class="item"><span class="in" title="' + esc(it.name) + '">' + esc(it.name) + "</span>"
       + '<span class="ib"><i style="width:' + Math.max(2, Math.round((it.total || 0) / top * 100)) + '%"></i></span>'
       + '<span class="iv">' + fmtTokD(it.total) + "</span></div>";
   }).join("");
-  body.innerHTML =
-    '<div class="metrics">'
-    + '<div class="metric"><div class="mv">' + fmtTokD(s.total) + '</div><div class="mk">总量 token</div></div>'
-    + '<div class="metric"><div class="mv">' + fmtTokD(s.daily) + '</div><div class="mk">日均 token</div></div>'
-    + '<div class="metric"><div class="mv">' + (s.cacheHit * 100).toFixed(1) + '%</div><div class="mk">缓存命中</div></div>'
-    + '<div class="metric"><div class="mv">' + (s.peakRate * 100).toFixed(0) + '%</div><div class="mk">峰时占比</div></div>'
-    + "</div>"
-    + '<div class="bars">' + bars + "</div>"
-    + '<div class="barAxis"><span>' + esc(((sec.xTime || [])[0] || "").slice(5, 10)) + "</span><span>" + esc(((sec.xTime || []).slice(-1)[0] || "").slice(5, 10)) + '</span></div>'
-    + '<div class="legend"><span><i style="background:var(--acc)"></i>谷时</span><span><i style="background:var(--mid)"></i>峰时</span><span>按' + (sec.granularity === "HOUR" ? "小时" : sec.granularity) + "</span></div>"
-    + '<div class="items">' + items + "</div>";
+  var itemsEl = document.getElementById("dItems");
+  if (itemsEl.dataset.sig !== items) { itemsEl.dataset.sig = items; itemsEl.innerHTML = items; }
 }
 async function loadDetail() {
   try {
@@ -758,16 +820,93 @@ async function loadDetail() {
   }
 }
 document.getElementById("detailDays").addEventListener("click", function (e) {
-  var b = e.target.closest("button"); if (!b) return;
+  var b = e.target.closest("button"); if (!b || b.classList.contains("on")) return;
   detailState.days = Number(b.dataset.d);
   this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
-  detailState.data = null; renderDetail(); loadDetail();
+  loadDetail(); // 保留旧内容后台刷新，不做清屏
 });
 document.getElementById("detailTab").addEventListener("click", function (e) {
   var b = e.target.closest("button"); if (!b) return;
   detailState.tab = b.dataset.t;
   this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
-  renderDetail();
+  renderDetail(); // 数据已在本地（model/mcp 一起取回），原位补丁零闪烁
+});
+
+/* ---- 系统健康度（官方 model-performance-day）---- */
+var healthState = { days: 7, data: null };
+function lineChart(series, xTime) {
+  var W = 760, H = 110, pad = 6, n = xTime.length;
+  var all = [];
+  series.forEach(function (s) { all = all.concat(s.data.filter(function (v) { return v != null; })); });
+  if (!all.length || n < 2) return "";
+  var lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
+  if (hi === lo) hi = lo + 1;
+  function pathOf(data) {
+    var xy = data.map(function (v, i) { return [pad + i / (n - 1) * (W - pad * 2), H - pad - (v - lo) / (hi - lo) * (H - pad * 2)]; });
+    return monotonePath(xy);
+  }
+  var out = '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" style="width:100%;height:110px;display:block">';
+  series.forEach(function (s, si) { out += '<path d="' + pathOf(s.data) + '" style="fill:none;stroke:' + s.color + ';stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round" vector-effect="non-scaling-stroke"/>'; });
+  out += "</svg>";
+  return out;
+}
+function ensureHealthSkeleton(body) {
+  if (body.dataset.built === "1") return;
+  body.innerHTML = '<div class="lineBlock"><div class="lineTitle">平均 Decode 速度（token/s）</div><div class="lines" id="hSpeed"></div>'
+    + '<div class="lineLegend"><span><i style="background:#4082F5"></i>Max&Pro</span><span><i style="background:#FF8E42"></i>Lite</span><span id="hRange"></span></div></div>'
+    + '<div class="lineBlock"><div class="lineTitle">请求成功率</div><div class="lines" id="hOk"></div>'
+    + '<div class="lineLegend"><span><i style="background:#4082F5"></i>Max&Pro</span><span><i style="background:#FF8E42"></i>Lite</span></div></div>';
+  body.dataset.built = "1";
+}
+function renderHealth() {
+  var body = document.getElementById("healthBody");
+  if (!healthState.data) return;
+  var d = healthState.data;
+  ensureHealthSkeleton(body);
+  var speed = document.getElementById("hSpeed");
+  var sigS = d.xTime.join(",") + "|" + d.proMax.join(",") + "|" + d.lite.join(",");
+  if (speed.dataset.sig !== sigS) {
+    speed.dataset.sig = sigS;
+    speed.innerHTML = lineChart([
+      { data: d.proMax, color: "#4082F5" },
+      { data: d.lite, color: "#FF8E42" },
+    ], d.xTime);
+    document.getElementById("hRange").textContent = ((d.xTime || [])[0] || "") + " ~ " + ((d.xTime || []).slice(-1)[0] || "");
+  }
+  var ok = document.getElementById("hOk");
+  var sigO = d.proMaxOk.join(",") + "|" + d.liteOk.join(",");
+  if (ok.dataset.sig !== sigO) {
+    ok.dataset.sig = sigO;
+    // 成功率都接近 1，拉开纵轴：以 0.9 为底
+    var lo = 0.9, hi = 1, W = 760, pad = 6, n = d.xTime.length;
+    function pathOf(data) {
+      var xy = data.map(function (v, i) { return [pad + i / (n - 1) * (W - pad * 2), H2 - pad - (Math.max(v, lo) - lo) / (hi - lo) * (H2 - pad * 2)]; });
+      return monotonePath(xy);
+    }
+    var H2 = 90;
+    var out = '<svg viewBox="0 0 ' + W + " " + H2 + '" preserveAspectRatio="none" style="width:100%;height:90px;display:block">';
+    out += '<path d="' + pathOf(d.proMaxOk) + '" style="fill:none;stroke:#4082F5;stroke-width:1.8;stroke-linecap:round" vector-effect="non-scaling-stroke"/>';
+    out += '<path d="' + pathOf(d.liteOk) + '" style="fill:none;stroke:#FF8E42;stroke-width:1.8;stroke-linecap:round" vector-effect="non-scaling-stroke"/>';
+    out += "</svg>";
+    ok.innerHTML = out;
+  }
+}
+async function loadHealth() {
+  try {
+    var r = await fetch("/api/health?days=" + healthState.days);
+    var j = await r.json();
+    if (!j.ok) throw new Error(j.error || "未知错误");
+    healthState.data = j.data;
+    renderHealth();
+  } catch (e) {
+    document.getElementById("healthBody").innerHTML = '<div class="err2">获取失败：' + esc(e.message) + "</div>";
+  }
+}
+document.getElementById("healthDays").addEventListener("click", function (e) {
+  var b = e.target.closest("button"); if (!b || b.classList.contains("on")) return;
+  healthState.days = Number(b.dataset.d);
+  this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
+  loadHealth();
 });
 
 applyTheme(document.documentElement.getAttribute("data-theme") || "dark");
@@ -775,6 +914,7 @@ keyStatus();
 schedule();
 load();
 loadDetail();
+loadHealth();
 </script></body></html>`;
 
 /* ---------- HTTP 服务 ---------- */
@@ -808,6 +948,19 @@ const server = http.createServer((req, res) => {
   if (req.url === "/api/detail" || req.url.startsWith("/api/detail?")) {
     const days = Number(new URL(req.url, "http://x").searchParams.get("days")) || 7;
     fetchUsageDetail(days)
+      .then((data) => {
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+        res.end(JSON.stringify({ ok: true, data }));
+      })
+      .catch((e) => {
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      });
+    return;
+  }
+  if (req.url === "/api/health" || req.url.startsWith("/api/health?")) {
+    const days = Number(new URL(req.url, "http://x").searchParams.get("days")) || 7;
+    fetchHealth(days)
       .then((data) => {
         res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
         res.end(JSON.stringify({ ok: true, data }));

@@ -153,6 +153,11 @@
   .item .ib > i { display:block; height:100%; border-radius:99px; background:var(--acc); }
   .item .iv { width:90px; text-align:right; font:500 11.5px var(--mono); color:var(--sub); font-variant-numeric:tabular-nums; }
   .detail .err2 { color:var(--bad); font-size:12px; padding:8px 0; }
+  .lineBlock { margin-top:10px; }
+  .lineTitle { font-size:11px; color:var(--sub); margin-bottom:4px; }
+  .lines svg { width:100%; display:block; }
+  .lineLegend { display:flex; gap:12px; font-size:10.5px; color:var(--dim); margin-top:4px; }
+  .lineLegend i { display:inline-block; width:14px; height:2px; vertical-align:3px; margin-right:4px; }
   .err { background:color-mix(in srgb,var(--bad) 9%,transparent); border:1px solid color-mix(in srgb,var(--bad) 35%,transparent); color:var(--bad); border-radius:var(--radius-inner); padding:11px 15px; margin-bottom:13px; display:none; font-size:12.5px; }
   .empty { color:var(--dim); text-align:center; padding:36px 0; grid-column:1/-1; }
 </style></head><body>
@@ -188,7 +193,17 @@
         <button data-t="model" class="on">模型</button><button data-t="mcp">工具</button>
       </div>
     </div>
-    <div id="detailBody"><div class="empty" style="padding:18px 0">加载中…</div></div>
+    <div id="detailBody"></div>
+  </section>
+
+  <section class="card detail enter" id="healthCard" style="--delay:220ms">
+    <div class="detailHead">
+      <h3>系统健康度 <span style="font-size:10.5px;color:var(--faint);font-weight:400">官方每日快照 · 高峰期优先保障 Max/Pro 的 Decode 速度</span></h3>
+      <div class="seg" id="healthDays">
+        <button data-d="1">今天</button><button data-d="7" class="on">7 天</button><button data-d="30">30 天</button>
+      </div>
+    </div>
+    <div id="healthBody"></div>
   </section>
 
   <div class="footer">GLM Usage Dashboard · /glm-usage 随时唤起</div>
@@ -403,44 +418,57 @@ async function saveKey(clear) {
     load();
   } catch (e) { document.getElementById("keystatus").textContent = "保存失败：" + e.message; }
 }
-/* ---- 使用详情（经 MCP 桥调 get_usage_detail，官方数据）---- */
+/* ---- 使用详情（经 MCP 桥调 get_usage_detail；骨架一次构建，切换只打补丁）---- */
 var detailState = { days: 7, tab: "model", data: null };
 function fmtTokD(n) {
   if (n >= 1e8) return (n / 1e8).toFixed(2) + " 亿";
   if (n >= 1e4) return (n / 1e4).toFixed(1) + " 万";
   return String(Math.round(n));
 }
+function ensureDetailSkeleton(body) {
+  if (body.dataset.built === "1") return;
+  body.innerHTML = '<div class="metrics">'
+    + '<div class="metric"><div class="mv" id="dTtl">—</div><div class="mk">总量 token</div></div>'
+    + '<div class="metric"><div class="mv" id="dDly">—</div><div class="mk">日均 token</div></div>'
+    + '<div class="metric"><div class="mv" id="dCh">—</div><div class="mk">缓存命中</div></div>'
+    + '<div class="metric"><div class="mv" id="dPk">—</div><div class="mk">峰时占比</div></div>'
+    + "</div>"
+    + '<div class="bars" id="dBars"></div>'
+    + '<div class="barAxis"><span id="dT0"></span><span id="dT1"></span></div>'
+    + '<div class="legend"><span><i style="background:var(--acc)"></i>谷时</span><span><i style="background:var(--mid)"></i>峰时</span><span id="dGran"></span></div>'
+    + '<div class="items" id="dItems"></div>';
+  body.dataset.built = "1";
+}
 function renderDetail() {
   var body = document.getElementById("detailBody");
-  var d = detailState.data;
-  if (!d) { body.innerHTML = '<div class="empty" style="padding:18px 0">加载中…</div>'; return; }
-  var sec = d[detailState.tab];
-  if (!sec) { body.innerHTML = '<div class="empty" style="padding:18px 0">无数据</div>'; return; }
-  if (sec.error) { body.innerHTML = '<div class="err2">⚠ ' + esc(sec.error) + "</div>"; return; }
+  if (!detailState.data) return;
+  var sec = detailState.data[detailState.tab];
+  if (!sec || sec.error) return;
   var s = sec.summary || {}, max = Math.max.apply(null, [1].concat(sec.totals || []));
+  ensureDetailSkeleton(body);
+  document.getElementById("dTtl").textContent = fmtTokD(s.total);
+  document.getElementById("dDly").textContent = fmtTokD(s.daily);
+  document.getElementById("dCh").textContent = (s.cacheHit * 100).toFixed(1) + "%";
+  document.getElementById("dPk").textContent = (s.peakRate * 100).toFixed(0) + "%";
   var bars = (sec.totals || []).map(function (v, i) {
     var h = Math.max(2, Math.round(v / max * 84));
     var peak = (sec.periodTypes || [])[i] === "PEAK";
     var t = (sec.xTime || [])[i] || "";
     return '<i class="' + (peak ? "peak" : "") + '" style="height:' + h + 'px" title="' + esc(t.slice(5, 16)) + " · " + fmtTokD(v) + ' token' + (peak ? " · 峰时" : " · 谷时") + '"></i>';
   }).join("");
+  var barsEl = document.getElementById("dBars");
+  if (barsEl.dataset.sig !== sec.totals.join(",")) { barsEl.dataset.sig = sec.totals.join(","); barsEl.innerHTML = bars; }
+  document.getElementById("dT0").textContent = ((sec.xTime || [])[0] || "").slice(5, 10);
+  document.getElementById("dT1").textContent = ((sec.xTime || []).slice(-1)[0] || "").slice(5, 10);
+  document.getElementById("dGran").textContent = "按" + (sec.granularity === "HOUR" ? "小时" : sec.granularity);
+  var top = sec.items && sec.items[0] ? sec.items[0].total || 1 : 1;
   var items = (sec.items || []).slice(0, 8).map(function (it) {
-    var top = sec.items[0] ? sec.items[0].total || 1 : 1;
     return '<div class="item"><span class="in" title="' + esc(it.name) + '">' + esc(it.name) + "</span>"
       + '<span class="ib"><i style="width:' + Math.max(2, Math.round((it.total || 0) / top * 100)) + '%"></i></span>'
       + '<span class="iv">' + fmtTokD(it.total) + "</span></div>";
   }).join("");
-  body.innerHTML =
-    '<div class="metrics">'
-    + '<div class="metric"><div class="mv">' + fmtTokD(s.total) + '</div><div class="mk">总量 token</div></div>'
-    + '<div class="metric"><div class="mv">' + fmtTokD(s.daily) + '</div><div class="mk">日均 token</div></div>'
-    + '<div class="metric"><div class="mv">' + (s.cacheHit * 100).toFixed(1) + '%</div><div class="mk">缓存命中</div></div>'
-    + '<div class="metric"><div class="mv">' + (s.peakRate * 100).toFixed(0) + '%</div><div class="mk">峰时占比</div></div>'
-    + "</div>"
-    + '<div class="bars">' + bars + "</div>"
-    + '<div class="barAxis"><span>' + esc(((sec.xTime || [])[0] || "").slice(5, 10)) + "</span><span>" + esc(((sec.xTime || []).slice(-1)[0] || "").slice(5, 10)) + '</span></div>'
-    + '<div class="legend"><span><i style="background:var(--acc)"></i>谷时</span><span><i style="background:var(--mid)"></i>峰时</span><span>按' + (sec.granularity === "HOUR" ? "小时" : sec.granularity) + "</span></div>"
-    + '<div class="items">' + items + "</div>";
+  var itemsEl = document.getElementById("dItems");
+  if (itemsEl.dataset.sig !== items) { itemsEl.dataset.sig = items; itemsEl.innerHTML = items; }
 }
 async function loadDetail() {
   try {
@@ -454,18 +482,90 @@ async function loadDetail() {
   }
 }
 document.getElementById("detailDays").addEventListener("click", function (e) {
-  var b = e.target.closest("button"); if (!b) return;
+  var b = e.target.closest("button"); if (!b || b.classList.contains("on")) return;
   detailState.days = Number(b.dataset.d);
   this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
-  detailState.data = null; renderDetail(); loadDetail();
+  loadDetail(); // 后台刷新，保留旧内容不清屏
 });
 document.getElementById("detailTab").addEventListener("click", function (e) {
   var b = e.target.closest("button"); if (!b) return;
   detailState.tab = b.dataset.t;
   this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
-  renderDetail();
+  renderDetail(); // model/mcp 本地已有，原位补丁
 });
 
-window.addEventListener("bridge-ready", function () { load(); schedule(); keyStatus(); loadDetail(); });
+/* ---- 系统健康度（经 MCP 桥调 get_health）---- */
+var healthState = { days: 7, data: null };
+function lineChart(series, xTime, H) {
+  var W = 760, pad = 6, n = xTime.length;
+  var all = [];
+  series.forEach(function (s) { all = all.concat(s.data.filter(function (v) { return v != null; })); });
+  if (!all.length || n < 2) return "";
+  var lo = Math.min.apply(null, all), hi = Math.max.apply(null, all);
+  if (hi === lo) hi = lo + 1;
+  function pathOf(data) {
+    var xy = data.map(function (v, i) { return [pad + i / (n - 1) * (W - pad * 2), H - pad - (v - lo) / (hi - lo) * (H - pad * 2)]; });
+    return monotonePath(xy);
+  }
+  var out = '<svg viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="none" style="width:100%;height:' + H + 'px;display:block">';
+  series.forEach(function (s) { out += '<path d="' + pathOf(s.data) + '" style="fill:none;stroke:' + s.color + ';stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round" vector-effect="non-scaling-stroke"/>'; });
+  return out + "</svg>";
+}
+function ensureHealthSkeleton(body) {
+  if (body.dataset.built === "1") return;
+  body.innerHTML = '<div class="lineBlock"><div class="lineTitle">平均 Decode 速度（token/s）</div><div class="lines" id="hSpeed"></div>'
+    + '<div class="lineLegend"><span><i style="background:#4082F5"></i>Max&Pro</span><span><i style="background:#FF8E42"></i>Lite</span><span id="hRange"></span></div></div>'
+    + '<div class="lineBlock"><div class="lineTitle">请求成功率</div><div class="lines" id="hOk"></div>'
+    + '<div class="lineLegend"><span><i style="background:#4082F5"></i>Max&Pro</span><span><i style="background:#FF8E42"></i>Lite</span></div></div>';
+  body.dataset.built = "1";
+}
+function renderHealth() {
+  var body = document.getElementById("healthBody");
+  if (!healthState.data) return;
+  var d = healthState.data;
+  ensureHealthSkeleton(body);
+  var speed = document.getElementById("hSpeed");
+  var sigS = d.xTime.join(",") + "|" + d.proMax.join(",") + "|" + d.lite.join(",");
+  if (speed.dataset.sig !== sigS) {
+    speed.dataset.sig = sigS;
+    speed.innerHTML = lineChart([
+      { data: d.proMax, color: "#4082F5" },
+      { data: d.lite, color: "#FF8E42" },
+    ], d.xTime, 110);
+    document.getElementById("hRange").textContent = ((d.xTime || [])[0] || "") + " ~ " + ((d.xTime || []).slice(-1)[0] || "");
+  }
+  var ok = document.getElementById("hOk");
+  var sigO = d.proMaxOk.join(",") + "|" + d.liteOk.join(",");
+  if (ok.dataset.sig !== sigO) {
+    ok.dataset.sig = sigO;
+    var lo = 0.9, hi = 1, W = 760, pad = 6, H2 = 90, n = d.xTime.length;
+    function pathOk(data) {
+      var xy = data.map(function (v, i) { return [pad + i / (n - 1) * (W - pad * 2), H2 - pad - (Math.max(v, lo) - lo) / (hi - lo) * (H2 - pad * 2)]; });
+      return monotonePath(xy);
+    }
+    ok.innerHTML = '<svg viewBox="0 0 ' + W + " " + H2 + '" preserveAspectRatio="none" style="width:100%;height:' + H2 + 'px;display:block">'
+      + '<path d="' + pathOk(d.proMaxOk) + '" style="fill:none;stroke:#4082F5;stroke-width:1.8;stroke-linecap:round" vector-effect="non-scaling-stroke"/>'
+      + '<path d="' + pathOk(d.liteOk) + '" style="fill:none;stroke:#FF8E42;stroke-width:1.8;stroke-linecap:round" vector-effect="non-scaling-stroke"/></svg>';
+  }
+}
+async function loadHealth() {
+  try {
+    var r = await window.__bridgeCall("tools/call", { name: "get_health", arguments: { days: healthState.days } });
+    var j = JSON.parse(r.content[0].text);
+    if (!j.ok) throw new Error(j.error || "未知错误");
+    healthState.data = j.data;
+    renderHealth();
+  } catch (e) {
+    document.getElementById("healthBody").innerHTML = '<div class="err2">获取失败：' + esc(e.message) + "</div>";
+  }
+}
+document.getElementById("healthDays").addEventListener("click", function (e) {
+  var b = e.target.closest("button"); if (!b || b.classList.contains("on")) return;
+  healthState.days = Number(b.dataset.d);
+  this.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
+  loadHealth();
+});
+
+window.addEventListener("bridge-ready", function () { load(); schedule(); keyStatus(); loadDetail(); loadHealth(); });
 </script>
 </body></html>

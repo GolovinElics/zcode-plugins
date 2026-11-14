@@ -28,7 +28,7 @@ import { execFileSync } from "node:child_process";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PANEL_URI = "ui://glm-usage/panel.html";
-const VERSION = "1.5.0";
+const VERSION = "1.6.0";
 const APP_VERSION = "3.18.2";
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8791"; // 仅当用户自建网页版时提示用，不作为依赖
 
@@ -236,6 +236,35 @@ async function fetchUsageDetail(days = 7) {
   return data;
 }
 
+/* ---------- 官方系统健康度（model-performance-day） ---------- */
+
+let healthCache = { at: 0, days: 0, data: null };
+async function fetchHealth(days = 7) {
+  days = [1, 7, 30].includes(days) ? days : 7;
+  if (healthCache.data && healthCache.days === days && Date.now() - healthCache.at < 5 * 60 * 1000) {
+    return healthCache.data;
+  }
+  const apiKey = configuredApiKey();
+  const token = apiKey || loadCodingPlanToken();
+  const url = "https://open.bigmodel.cn/api/monitor/usage/model-performance-day?" +
+    new URLSearchParams({
+      startTime: fmtLocalDayHour(new Date(Date.now() - days * 86400 * 1000)),
+      endTime: fmtLocalDayHour(new Date()),
+    }).toString();
+  const json = await httpsGetJson(url, { Authorization: token });
+  if (!json.success) throw new Error(json.msg || `health code=${json.code}`);
+  const d = json.data || {};
+  const data = {
+    xTime: d.x_time || [],
+    lite: d.liteDecodeSpeed || [],
+    proMax: d.proMaxDecodeSpeed || [],
+    liteOk: d.liteSuccessRate || [],
+    proMaxOk: d.proMaxSuccessRate || [],
+  };
+  healthCache = { at: Date.now(), days, data };
+  return data;
+}
+
 /* ---------- 数据整理 ---------- */
 
 function normalizeBalance(data) {
@@ -379,6 +408,12 @@ const TOOLS = [
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
   {
+    name: "get_health",
+    description: "Fetch official system health daily snapshot (Max&Pro vs Lite decode speed and success rate) for the last N days (1/7/30). Returns JSON text.",
+    inputSchema: { type: "object", properties: { days: { type: "number", description: "1, 7 or 30" } }, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+  {
     name: "set_coding_key",
     description: "Save the bigmodel.cn Coding Plan API key for this machine (stored in ~/.glm-usage/config.json, mode 600). NOTE: tool arguments may persist in conversation history — for a human user, prefer the panel's settings input which bypasses the conversation. Pass empty string to clear.",
     inputSchema: { type: "object", properties: { key: { type: "string" } }, required: ["key"], additionalProperties: false },
@@ -426,6 +461,14 @@ async function handleToolCall(name, args) {
     try {
       const days = [1, 7, 30].includes(Number(args?.days)) ? Number(args.days) : 7;
       return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: await fetchUsageDetail(days) }) }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }] };
+    }
+  }
+  if (name === "get_health") {
+    try {
+      const days = [1, 7, 30].includes(Number(args?.days)) ? Number(args.days) : 7;
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: await fetchHealth(days) }) }] };
     } catch (e) {
       return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }] };
     }
