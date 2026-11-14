@@ -1,7 +1,7 @@
 /* Shared interaction state. Inspired by dsh-context v0.84.1; ZCode implementation. */
 function nodeKey(node) {
   if (node.nodeType !== 1) return null;
-  for (const name of ['id', 'data-key', 'data-sid', 'data-item', 'data-step', 'data-cat-row']) {
+  for (const name of ['id', 'data-key', 'data-sid', 'data-item', 'data-step', 'data-cat-row', 'data-agent', 'data-edge', 'data-slice', 'data-day']) {
     if (node.hasAttribute(name)) return name + ':' + node.getAttribute(name);
   }
   return null;
@@ -20,7 +20,7 @@ function morphChildren(parent, source) {
       if (current.nodeType === 3) { if (current.data !== next.data) current.data = next.data; }
       else if (current.nodeType === 1) {
         for (const attr of [...current.attributes]) {
-          if (!next.hasAttribute(attr.name) && !['aria-describedby', 'data-hovered'].includes(attr.name)) current.removeAttribute(attr.name);
+          if (!next.hasAttribute(attr.name) && !['aria-describedby', 'data-hovered', 'data-pinned'].includes(attr.name)) current.removeAttribute(attr.name);
         }
         for (const attr of [...next.attributes]) if (current.getAttribute(attr.name) !== attr.value) current.setAttribute(attr.name, attr.value);
         morphChildren(current, next);
@@ -44,13 +44,18 @@ function toast(message) {
 }
 let tipAnchor = null, hoverElement = null, lastInput = 'pointer';
 function restoreHover(root) {
-  if (hoverElement?.isConnected && root.contains(hoverElement)) { highlightDonut(hoverElement); highlightCategory(); }
+  const active = lastInput === 'keyboard' ? document.activeElement : hoverElement;
+  root.querySelectorAll('.donutWrap').forEach(wrap => highlightDonut(active?.isConnected && wrap.contains(active) ? active : wrap));
+  if (root.matches?.('.donutWrap')) highlightDonut(root);
+  highlightDay(active?.closest?.('[data-day]')?.dataset.day);
+  highlightCategory(state.hoverCat || state.catPick, hoverElement?.closest?.('[data-item]')?.dataset.item);
 }
 function showTip(anchor, label) {
   if (!anchor || !(label || anchor.dataset.tip)) return hideTip();
   const tip = document.getElementById('hoverTip');
   if (tipAnchor !== anchor) tipAnchor?.removeAttribute('aria-describedby');
   tipAnchor = anchor; anchor.setAttribute('aria-describedby', 'hoverTip');
+  (anchor.closest('dialog[open]') || document.body).append(tip);
   tip.textContent = label || anchor.dataset.tip;
   tip.hidden = false;
   const rect = anchor.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
@@ -65,7 +70,8 @@ function highlightDonut(target) {
   const wrap = target?.closest('.donutWrap');
   if (!wrap) return;
   const picked = target.closest('[data-slice]');
-  const key = picked?.dataset.slice ?? wrap.dataset.pinned ?? null;
+  let key = picked?.dataset.slice ?? wrap.dataset.pinned ?? null;
+  if (key !== null && ![...wrap.querySelectorAll('button[data-slice]')].some(el => el.dataset.slice === key)) { delete wrap.dataset.pinned; key = null; }
   wrap.querySelectorAll('[data-slice]').forEach(el => {
     el.classList.toggle('dimmed', key !== null && el.dataset.slice !== key);
     el.classList.toggle('highlighted', el.dataset.slice === key);
@@ -91,6 +97,7 @@ function selectSession(sid) {
     state.sessionId = sid; state.ctx = null; state.browser = null; state.fleet = null;
     state.trendKey = null; state.trendSel = -1; state.catPick = null; state.hoverCat = null; state.snapshot = 'live';
     state.expanded.clear(); state.browserQuery = ''; state.inspectorId = null;
+    state.rowLimits = {}; state.dnaLimit = 160; state.stripFocus = null; state.trendHover = null; state.agentPick = null; state.agentHover = null;
     requestTickets.context++; requestTickets.browser++; requestTickets.fleet++;
     inFlight.context = false; inFlight.browser = false; inFlight.fleet = false;
     document.getElementById('browserSearch').value = '';
@@ -212,37 +219,45 @@ function bootInteractions() {
     hoverElement = e.target;
     const title = e.target.closest('[title]');
     if (title) { title.dataset.tip = title.title; title.removeAttribute('title'); }
-    const tip = e.target.closest('[data-tip]'); if (tip && lastInput === 'pointer') showTip(tip);
+    const slice = e.target.closest('.donutWrap [data-slice]');
+    const tip = e.target.closest('[data-tip]') || (slice && [...slice.closest('.donutWrap').querySelectorAll('button[data-slice]')].find(b => b.dataset.slice === slice.dataset.slice));
+    if (tip && lastInput === 'pointer') showTip(slice || tip, tip.dataset.tip);
+    highlightDay(e.target.closest('[data-day]')?.dataset.day);
     highlightDonut(e.target);
     const cat = e.target.closest('[data-cat]'); if (cat) { state.hoverCat = cat.dataset.cat; highlightCategory(cat.dataset.cat, cat.dataset.item); }
   });
   document.addEventListener('pointerout', e => {
     const next = e.relatedTarget instanceof Element ? e.relatedTarget : null;
-    if (!next?.closest('[data-tip]')) hideTip();
-    const donut = e.target.closest('.donutWrap'); if (donut && !donut.contains(next)) highlightDonut(donut);
+    hoverElement = next;
+    if (!next?.closest('[data-tip], [data-slice]')) hideTip();
+    const donut = e.target.closest('.donutWrap'); if (donut) highlightDonut(donut.contains(next) ? next : donut);
+    highlightDay(next?.closest('[data-day]')?.dataset.day);
     if (e.target.closest('[data-cat]') && !next?.closest('[data-cat]')) { state.hoverCat = null; highlightCategory(); }
   });
   document.addEventListener('focusin', e => {
-    const tip = e.target.closest('[data-tip]'); if (tip) showTip(tip); highlightDonut(e.target);
+    const tip = e.target.closest('[data-tip]'); if (tip && lastInput === 'keyboard') showTip(tip); highlightDonut(e.target);
+    highlightDay(e.target.closest('[data-day]')?.dataset.day);
     const cat = e.target.closest('[data-cat]'); if (cat) { state.hoverCat = cat.dataset.cat; highlightCategory(cat.dataset.cat, cat.dataset.item); }
   });
-  document.addEventListener('focusout', e => { hideTip(); const wrap = e.target.closest('.donutWrap'); if (wrap) highlightDonut(wrap); state.hoverCat = null; highlightCategory(); });
+  document.addEventListener('focusout', e => { highlightDay(null); hideTip(); const wrap = e.target.closest('.donutWrap'); if (wrap) highlightDonut(wrap); state.hoverCat = null; highlightCategory(); });
   document.addEventListener('scroll', () => {
     hideTip();
     if (lastInput === 'keyboard') requestAnimationFrame(() => { const anchor = document.activeElement.closest?.('[data-tip]'); if (anchor) showTip(anchor); });
   }, true); window.addEventListener('resize', hideTip);
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') { hideTip(); document.querySelectorAll('.donutWrap[data-pinned]').forEach(w => { delete w.dataset.pinned; highlightDonut(w); }); } });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !e.target.closest('dialog[open]')) { hideTip(); state.trendHover = null; state.trendKey = null; updateTrendPick(); state.agentPick = null; state.agentHover = null; highlightAgent(); renderAgentInspector(); document.querySelectorAll('.donutWrap[data-pinned]').forEach(w => { delete w.dataset.pinned; highlightDonut(w); }); } });
   document.addEventListener('click', e => {
     const slice = e.target.closest('[data-slice]');
-    if (slice) { const wrap = slice.closest('.donutWrap'); if (wrap) { if (wrap.dataset.pinned === slice.dataset.slice) delete wrap.dataset.pinned; else wrap.dataset.pinned = slice.dataset.slice; highlightDonut(slice); } }
+    if (slice) { const wrap = slice.closest('.donutWrap'); if (wrap) { if (wrap.dataset.pinned === slice.dataset.slice) delete wrap.dataset.pinned; else wrap.dataset.pinned = slice.dataset.slice; highlightDonut(wrap); if (tipAnchor) showTip(tipAnchor); } }
     const item = e.target.closest('[data-item]'); if (item) { inspectItem(item.dataset.item); return; }
     const cat = e.target.closest('[data-pick-cat]'); if (cat) { pickCategory(cat.dataset.pickCat); return; }
+    const agent = e.target.closest('[data-agent]');
+    if (agent) { state.agentPick = state.agentPick === agent.dataset.agent ? null : agent.dataset.agent; highlightAgent(); renderAgentInspector(); return; }
     const session = e.target.closest('[data-sid]'); if (session) { selectSession(session.dataset.sid); return; }
     const group = e.target.closest('[data-group]'); if (group) { state.group = group.dataset.group; renderSessions(); return; }
     const date = e.target.closest('[data-day]'); if (date) { state.day = state.day === date.dataset.day ? null : date.dataset.day; renderSessions(); renderDaily(state.insights); renderHeatmap(state.insights); reveal(document.getElementById('insSessions')); }
     const kpi = e.target.closest('[data-kpi]'); if (kpi) {
       const index = Number(kpi.dataset.kpi);
-      if (index === 0) { state.group = ''; state.day = null; state.search = ''; state.archive = ''; document.getElementById('sessSearch').value = ''; document.getElementById('sessArchive').value = ''; syncSelect(document.getElementById('sessArchive')); renderSessions(); reveal(document.getElementById('insSessions')); }
+      if (index === 0) { state.group = ''; state.day = null; state.search = ''; state.archive = ''; document.getElementById('sessSearch').value = ''; document.getElementById('sessArchive').value = ''; syncSelect(document.getElementById('sessArchive')); renderSessions(); renderDaily(state.insights); renderHeatmap(state.insights); reveal(document.getElementById('insSessions')); }
       else if (index === 2) toast('可在本地配置 prices 为不同 GLM 模型设置单价。套餐额度不等同于按量计费。');
       else reveal(document.getElementById(index === 4 ? 'insToolsList' : index === 5 ? 'insTimingBody' : 'insTokensBody'));
     }
@@ -267,7 +282,7 @@ function bootInteractions() {
   const dialog = document.getElementById('itemDialog');
   document.getElementById('inspectorClose').onclick = () => dialog.close();
   dialog.addEventListener('click', e => { if (e.target === dialog) { const r = dialog.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dialog.close(); } });
-  dialog.addEventListener('close', () => { inspectorTicket++; });
+  dialog.addEventListener('close', () => { inspectorTicket++; hideTip(); });
   for (const [name, delta] of [['Prev', -1], ['Next', 1]]) document.getElementById('inspector' + name).onclick = () => {
     const rows = browserRows(), idx = rows.findIndex(r => r.it.id === state.inspectorId); if (rows[idx + delta]) inspectItem(rows[idx + delta].it.id);
   };
@@ -278,3 +293,7 @@ function bootInteractions() {
   document.addEventListener('visibilitychange', () => { if (document.hidden) stopLive(); else startLive(); });
 }
 bootInteractions();
+
+function highlightDay(day) {
+  document.querySelectorAll('#tab-insights [data-day]').forEach(el => el.classList.toggle('dayHot', !!day && el.dataset.day === day));
+}
