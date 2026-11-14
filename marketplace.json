@@ -5,7 +5,7 @@
     {
       "name": "glm-usage",
       "source": "./glm-usage/plugin",
-      "version": "1.4.0",
+      "version": "1.4.1",
       "description": "GLM Coding Plan usage dashboard: in-app panel plus local web UI with 5h/weekly quota gauges, burn rate, ETA and history sparkline.",
       "description_i18n": {
         "en": "GLM Coding Plan usage dashboard: in-app panel plus local web UI with 5h/weekly quota gauges, burn rate, ETA and history sparkline.",
@@ -14,7 +14,7 @@
       "displayName": "GLM 用量看板",
       "displayName_i18n": { "zh-CN": "GLM 用量看板", "en-US": "GLM Usage Dashboard" },
       "category": "developer-tools",
-      "icon": "https://raw.githubusercontent.com/GolovinElics/zcode-plugins/main/glm-usage/plugin/icon-light.png"
+      "icon": "https://raw.githubusercontent.com/GolovinElics/zcode-plugins/main/glm-usage/plugin/icon-light.png?v=2"
     }
   ]
 }

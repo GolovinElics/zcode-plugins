@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none">
+  <!-- 极简仪表 logo：270° 圆弧 + 指针 + 轴心（整体下移 11px 做视觉居中） -->
+  <g transform="translate(0 11)">
+    <path d="M74.3 181.7A76 76 0 1 1 181.7 181.7" stroke="#111111" stroke-width="22" stroke-linecap="round"/>
+    <path d="M128 128L166 90" stroke="#111111" stroke-width="18" stroke-linecap="round"/>
+    <circle cx="128" cy="128" r="15" fill="#111111"/>
+  </g>
+</svg>

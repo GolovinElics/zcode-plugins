@@ -58,3 +58,9 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.<user>.glm-usage-das
 
 面板协议（ui:// surface、握手方向、CSP 实况、MCP 桥取数、缓存规则）见技能
 `~/.zcode/skills/zcode-plugin-lessons/SKILL.md`。
+
+## 排错
+
+- **更新或重装插件后面板报 "MCP App connection is unavailable"**：旧任务保留旧的能力目录，请**新建任务**再打开面板
+- Coding Plan 显示"未配置 API Key"：在面板 ⚙ 设置里填入 bigmodel.cn 的 API Key，或在 ZCode 内嵌浏览器登录 bigmodel.cn
+- 速率/走势显示"采样中…"：历史样本需积累 5～10 分钟
