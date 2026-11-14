@@ -331,6 +331,7 @@ const HTML = `<!doctype html>
     --bd:#e3e1db; --bd2:#d5d2cb;
     --fg:#2d2a26; --sub:#6d6760; --dim:#948e87; --faint:#b5afa8;
     --prim:#8b8680; --prim2:#726d67;
+    --acc:#3b7ddd; --acc2:#5a95e8;
     --ok:#10b981; --mid:#e0aa14; --bad:#c65746;
     --glow:none;
   }
@@ -339,6 +340,7 @@ const HTML = `<!doctype html>
     --bd:color-mix(in srgb,#e3e1db 10%,transparent); --bd2:color-mix(in srgb,#e3e1db 20%,transparent);
     --fg:#ece9e3; --sub:#b3ada5; --dim:#8a847c; --faint:#605b54;
     --prim:#b3ada5; --prim2:#d8d3cb;
+    --acc:#6ea8ff; --acc2:#9cc4ff;
     --ok:#3ddc97; --mid:#e6b422; --bad:#e5735f;
     --glow:0 10px 34px rgba(0,0,0,.35);
   }
@@ -433,9 +435,9 @@ const HTML = `<!doctype html>
   .metric .mv { font:650 15px var(--mono); font-variant-numeric:tabular-nums; }
   .metric .mk { font-size:10.5px; color:var(--dim); margin-top:1px; }
   .bars { display:flex; align-items:flex-end; gap:1px; height:88px; padding:2px 0; }
-  .bars > i { flex:1; min-width:1px; border-radius:1px 1px 0 0; background:var(--acc); opacity:.75; transition:opacity .15s; }
-  .bars > i.peak { background:var(--mid); }
-  .bars > i:hover { opacity:1; }
+  .bars > div { flex:1; min-width:1px; border-radius:1px 1px 0 0; background:var(--acc); opacity:.75; transition:opacity .15s; }
+  .bars > div.peak { background:var(--mid); }
+  .bars > div:hover { opacity:1; }
   .barAxis { display:flex; justify-content:space-between; font-size:9.5px; color:var(--faint); margin-top:4px; font-family:var(--mono); }
   .legend { display:flex; gap:12px; font-size:10.5px; color:var(--dim); margin-top:6px; }
   .legend i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
