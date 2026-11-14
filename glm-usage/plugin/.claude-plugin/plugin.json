@@ -1,6 +1,6 @@
 {
   "name": "glm-usage",
-  "version": "1.7.0",
+  "version": "2.0.0",
   "skills": "./skills",
   "commands": "./commands",
   "description": "GLM Coding Plan usage dashboard: in-app panel plus local web UI with 5h/weekly quota gauges, burn rate, ETA and history sparkline.",
@@ -8,13 +8,24 @@
     "en": "GLM Coding Plan usage dashboard: in-app panel plus local web UI with 5h/weekly quota gauges, burn rate, ETA and history sparkline.",
     "zh-CN": "GLM 套餐用量看板：应用内面板 + 本地网页，环形仪表展示 5 小时/每周额度、燃烧速率、触顶预测与历史走势。"
   },
-  "author": { "name": "liangfeng" },
-  "keywords": ["glm", "coding-plan", "usage", "quota", "dashboard", "bigmodel"],
+  "author": {
+    "name": "liangfeng"
+  },
+  "keywords": [
+    "glm",
+    "coding-plan",
+    "usage",
+    "quota",
+    "dashboard",
+    "bigmodel"
+  ],
   "mcpServers": {
     "glm-usage": {
       "type": "stdio",
       "command": "node",
-      "args": ["${ZCODE_PLUGIN_ROOT}/mcp/server.mjs"]
+      "args": [
+        "${ZCODE_PLUGIN_ROOT}/mcp/server.mjs"
+      ]
     }
   },
   "ui": {

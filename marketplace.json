@@ -1,18 +1,23 @@
 {
   "name": "zcode-plugins",
-  "owner": { "name": "liangfeng" },
+  "owner": {
+    "name": "liangfeng"
+  },
   "plugins": [
     {
       "name": "glm-usage",
       "source": "./glm-usage/plugin",
-      "version": "1.7.0",
-      "description": "GLM Coding Plan usage dashboard: in-app panel plus local web UI with 5h/weekly quota gauges, burn rate, ETA and history sparkline.",
+      "version": "2.0.0",
+      "description": "GLM usage + ZCode context insight dashboard: quota gauges, burn rate, context stats, context browser, trend, fleet.",
       "description_i18n": {
         "en": "GLM Coding Plan usage dashboard: in-app panel plus local web UI with 5h/weekly quota gauges, burn rate, ETA and history sparkline.",
         "zh-CN": "GLM 套餐用量看板：应用内面板 + 本地网页，展示 5 小时/每周额度、燃烧速率、触顶预测与历史走势。"
       },
       "displayName": "GLM 用量看板",
-      "displayName_i18n": { "zh-CN": "GLM 用量看板", "en-US": "GLM Usage Dashboard" },
+      "displayName_i18n": {
+        "zh-CN": "GLM 用量看板",
+        "en-US": "GLM Usage Dashboard"
+      },
       "category": "developer-tools",
       "icon": "https://raw.githubusercontent.com/GolovinElics/zcode-plugins/main/glm-usage/plugin/icon-light.png?v=2"
     }
