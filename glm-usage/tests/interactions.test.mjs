@@ -78,3 +78,17 @@ test('scroll clears transient hover while preserving pinned requests and agents'
   assert.equal(r.state.hoverCat,null); assert.equal(r.state.catPick,'system');
   assert(calls.includes('updateTrendPick')); assert(calls.includes('renderAgentInspector'));
 });
+test('fleet connectors follow horizontal and folded card geometry', () => {
+  const parent={left:10,top:20,width:100,height:80,right:110,bottom:100};
+  for(const [child,expected] of [
+    [{left:146,top:20,width:100,height:80},'M 100 40 C 118 40 118 40 136 40'],
+    [{left:10,top:128,width:100,height:80},'M 50 80 C 50 94 50 94 50 108'],
+  ]) {
+    const svg={setAttribute(){}},lead={getBoundingClientRect:()=>parent};
+    const member={dataset:{agent:'child'},getBoundingClientRect:()=>child};
+    const grid={offsetWidth:300,getBoundingClientRect:()=>({left:10,top:20,width:300,height:220}),querySelector:()=>lead,querySelectorAll:()=>[member]};
+    const r=runtime({getElementById:id=>id==='fleetGrid'?grid:svg,querySelectorAll:()=>[]});
+    let rendered='';r.patchHTML=(_id,html)=>{rendered=html;};r.drawFleetEdges();
+    assert(rendered.includes(expected));assert(rendered.includes('data-edge="child"'));
+  }
+});

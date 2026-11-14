@@ -800,3 +800,41 @@ dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self
 @keyframes detailReveal { from { opacity:.5; transform:translateY(-3px); } }
 @media(max-width:600px) { .agentInspector .stepMetrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(prefers-reduced-motion:reduce) { .segArc, .agentEdges .edgeHot .agentLink, .activityDetail { animation:none; } }
+
+/* Size the family workspace to its pane, keeping the inspector beside the graph. */
+#tab-agent { container-type:inline-size; container-name:agent-page; }
+#tab-agent .fleetBanner { padding:14px 16px; margin-bottom:12px; }
+#tab-agent .fleetBanner h2 { font-size:17px; }
+#tab-agent .fleetBanner .d { margin-top:4px; font-size:11px; }
+#tab-agent .fleetBanner .stats { gap:8px; }
+#tab-agent .fleetBanner .st { padding:6px 10px; min-width:64px; }
+#tab-agent .fleetBanner .v { font-size:18px; }
+.agentWorkspace { display:grid; grid-template-columns:minmax(0,1.8fr) minmax(260px,1fr); align-items:start; gap:18px; }
+.agentWorkspace .agentGrid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:36px; align-items:center; padding:4px; }
+.agentWorkspace .agentLead { min-width:0; }
+.agentWorkspace .agentChildren { display:grid; grid-template-columns:minmax(0,1fr); min-width:0; gap:12px; padding:0; }
+.agentWorkspace .agentCard { width:100%; max-width:none; padding:10px 12px; }
+.agentWorkspace .agentCard .an { white-space:normal; overflow-wrap:anywhere; line-height:1.4; }
+.agentWorkspace .agentCard .ah { align-items:flex-start; }
+.agentWorkspace .agentCard .ad { margin-top:4px; }
+.agentWorkspace .agentCard .sPill { margin-left:auto; flex:none; }
+.agentWorkspace .agentCard .am { margin:4px 0; }
+.agentWorkspace .agentValue { font-size:20px; margin:8px 0; }
+.agentWorkspace .agentOpen { margin-top:8px; padding-top:6px; }
+.agentWorkspace .agentInspector { margin-top:0; padding:12px; }
+.agentWorkspace .agentInspectorHead { gap:6px; margin-bottom:8px; }
+.agentWorkspace .agentInspectorHead > div { flex-basis:140px; }
+.agentWorkspace .agentInspector .stepMetrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.agentWorkspace .stepNote { line-height:1.5; }
+#tab-agent .lc-title { flex-wrap:wrap; gap:6px 12px; }
+@container agent-page (max-width:1000px) {
+  .agentWorkspace { grid-template-columns:minmax(0,1fr); gap:12px; }
+  .agentWorkspace .agentInspector .stepMetrics { grid-template-columns:repeat(4,minmax(0,1fr)); }
+  .agentWorkspace .agentInspectorHead > div { flex-basis:auto; }
+}
+@container agent-page (max-width:600px) {
+  .agentWorkspace .agentGrid { grid-template-columns:minmax(0,1fr); gap:28px; }
+  .agentWorkspace .agentInspector .stepMetrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  #tab-agent .fleetBanner .stats { width:100%; justify-content:space-between; }
+  #tab-agent .fleetBanner .st { min-width:0; flex:1; padding:6px; }
+}

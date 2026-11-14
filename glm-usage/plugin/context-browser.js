@@ -129,12 +129,18 @@ function drawFleetEdges() {
   const grid = document.getElementById('fleetGrid'), svg = document.getElementById('agentEdges'), lead = grid.querySelector('.agentLead .agentCard');
   if (!svg || !lead || grid.offsetWidth === 0) return;
   const box = grid.getBoundingClientRect(), parent = lead.getBoundingClientRect();
-  const x1 = parent.left + parent.width / 2 - box.left, y1 = parent.bottom - box.top;
   svg.setAttribute('viewBox', `0 0 ${box.width} ${box.height}`);
   patchHTML('agentEdges', [...grid.querySelectorAll('.agentChildren .agentCard')].map(el => {
-    const child = el.getBoundingClientRect(), x2 = child.left + child.width / 2 - box.left, y2 = child.top - box.top;
-    const middle = (y1 + y2) / 2;
-    return `<g data-edge="${esc(el.dataset.agent)}"><path class="agentLink" d="M ${x1} ${y1} C ${x1} ${middle} ${x2} ${middle} ${x2} ${y2}" fill="none" stroke="var(--bd2)" stroke-width="1.5"/><circle cx="${x2}" cy="${y2}" r="2.5" fill="var(--acc)"/></g>`;
+    const child = el.getBoundingClientRect();
+    const horizontal = child.left >= parent.right - 1;
+    const x1 = (horizontal ? parent.right : parent.left + parent.width / 2) - box.left;
+    const y1 = (horizontal ? parent.top + parent.height / 2 : parent.bottom) - box.top;
+    const x2 = (horizontal ? child.left : child.left + child.width / 2) - box.left;
+    const y2 = (horizontal ? child.top + child.height / 2 : child.top) - box.top;
+    const curve = horizontal
+      ? `${(x1 + x2) / 2} ${y1} ${(x1 + x2) / 2} ${y2}`
+      : `${x1} ${(y1 + y2) / 2} ${x2} ${(y1 + y2) / 2}`;
+    return `<g data-edge="${esc(el.dataset.agent)}"><path class="agentLink" d="M ${x1} ${y1} C ${curve} ${x2} ${y2}" fill="none" stroke="var(--bd2)" stroke-width="1.5"/><circle cx="${x2}" cy="${y2}" r="2.5" fill="var(--acc)"/></g>`;
   }).join(''));
   highlightAgent();
 }
