@@ -220,10 +220,22 @@
     <section class="card" style="margin-bottom:12px">
       <div class="lc-title"><span class="t">Agent Network</span><span class="s" id="fleetNetSub"></span></div>
       <div class="agentWorkspace">
-        <div class="agentGrid" id="fleetGrid"><svg class="agentEdges" id="agentEdges" aria-hidden="true"></svg><div id="fleetNodes"></div></div>
+        <div class="agentGrid" id="fleetGrid"><div class="agentTreeWrap"><svg class="agentEdges" id="agentEdges" aria-hidden="true"></svg><div id="fleetNodes"></div></div></div>
         <section id="agentInspector" class="agentInspector" aria-label="Agent 会话预览"></section>
       </div>
     </section>
+    <div class="ovMid" style="margin-bottom:12px">
+      <section class="card">
+        <div class="lc-title"><span class="t">跨 Agent 协作</span><span class="s" id="fleetCommsSub"></span></div>
+        <div class="chipbar" id="commsChips" role="group" aria-label="协作记录筛选"></div>
+        <div class="commsList" id="fleetComms"><span class="empty">—</span></div>
+      </section>
+      <section class="card">
+        <div class="lc-title"><span class="t">协作任务</span><span class="s" id="fleetWorkSub"></span></div>
+        <div class="chipbar" id="workChips" role="group" aria-label="协作任务筛选"></div>
+        <div class="commsList" id="fleetWork"><span class="empty">—</span></div>
+      </section>
+    </div>
     <section class="card">
       <div class="lc-title"><span class="t">成员明细</span><span class="s" id="fleetSub"></span></div>
       <div id="fleetMembers"><span class="empty">—</span></div>

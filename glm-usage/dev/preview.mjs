@@ -6,7 +6,7 @@ import { mcpClient } from './mcp-client.mjs';
 
 const live = process.env.GLM_PREVIEW_LIVE === '1';
 const client = live ? mcpClient() : null;
-const readTools = new Set(['get_view_state', 'get_usage_json', 'get_config', 'get_usage', 'get_usage_detail', 'get_health', 'get_insights', 'get_sessions', 'list_sessions', 'get_session_context', 'get_context_browser', 'get_context_item', 'get_fleet', 'get_activity']);
+const readTools = new Set(['get_view_state', 'get_usage_json', 'get_config', 'get_usage', 'get_usage_detail', 'get_health', 'get_insights', 'get_sessions', 'list_sessions', 'get_session_context', 'get_context_browser', 'get_context_item', 'get_fleet', 'get_activity', 'get_day_sessions']);
 
 const port = Number(process.env.GLM_PREVIEW_PORT || 8792);
 const origin = `http://127.0.0.1:${port}`;

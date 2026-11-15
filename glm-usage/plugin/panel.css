@@ -638,14 +638,28 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible, summary:foc
 .loadingRows i { display:block; height:12px; border-radius:4px; background:var(--card2); width:90%; }.loadingRows i:nth-child(2) { width:65%; }.loadingRows i:nth-child(3) { width:78%; }
 .fleetBanner { background:var(--card); border-color:var(--bd); }
 .fleetBanner .eyebrow { display:none; }.fleetBanner h2 { font-size:20px; font-weight:600; }
-.agentGrid { display:block; }
-.agentLead { display:flex; justify-content:center; }
-.agentChildren { position:relative; display:flex; flex-wrap:wrap; justify-content:center; gap:18px; padding-top:40px; }
-.agentChildren::before { content:""; position:absolute; top:0; left:50%; height:40px; border-left:1px solid var(--bd2); }
-.agentChildren > .agentCard { position:relative; }
-.agentChildren > .agentCard::before { content:""; position:absolute; top:-20px; left:50%; height:20px; border-left:1px solid var(--bd2); }
-.agentChildren > .agentCard::after { content:""; position:absolute; top:-20px; left:calc(50% - 9px); width:calc(100% + 18px); border-top:1px solid var(--bd2); }
-.agentChildren > .agentCard:last-child::after { display:none; }
+.agentGrid { display:block; overflow-x:auto; }
+/* 横向思维导：根在最左，子级按层级一列一列向右展开；贝塞尔连线由 agentEdges SVG 绘制 */
+.agentTreeWrap { position:relative; width:max-content; min-width:100%; padding:4px; }
+.treeBranch { display:flex; align-items:center; gap:26px; }
+.treeBranch > .agentCard { flex:none; width:280px; }
+.treeKids { display:flex; flex-direction:column; gap:18px; }
+/* 跨 Agent 协作与协作任务（对齐编队页卡片密度） */
+.commsList { display:flex; flex-direction:column; gap:2px; max-height:300px; overflow-y:auto; }
+.commsRow { display:flex; align-items:center; gap:9px; width:100%; border:0; background:transparent; text-align:left; padding:6px 8px; border-radius:6px; transition:background-color .18s ease; }
+.commsRow:hover, .commsRow:focus-visible { background:var(--card2); }
+.cKind { flex:none; font-size:10px; line-height:1.6; border-radius:4px; padding:0 5px; background:color-mix(in srgb,var(--acc) 14%,transparent); color:var(--acc); }
+.commsRow .cKind.message { background:color-mix(in srgb,var(--ok) 14%,transparent); color:var(--ok); }
+.cBody { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:1px; }
+.cDesc { font-size:11.5px; color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cMeta { font-size:10px; color:var(--faint); font-family:var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cdot, .wdot { flex:none; width:7px; height:7px; border-radius:50%; background:var(--bd); }
+.cdot.live { background:var(--acc); animation:pulse 2s ease infinite; }
+.wdot.done { background:var(--ok); }
+.wdot.ongoing { background:var(--acc); }
+.cState { flex:none; font-size:10px; color:var(--dim); }
+.runState { font-size:9.5px; color:var(--faint); }
+.runState.on { color:var(--acc); }
 .agentCard { flex:1 1 220px; width:280px; max-width:340px; min-width:0; text-align:left; padding:14px; }
 .agentCard:hover, .agentCard.agentHot { border-color:var(--agent); background:color-mix(in srgb,var(--agent) 6%,var(--card)); }
 .agentValue { font:650 22px var(--mono); margin:12px 0; }
@@ -729,7 +743,6 @@ button.barRow, button.fileRow { width:100%; text-align:left; border:0; backgroun
 .agentGrid { position:relative; }
 .agentEdges { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:hidden; }
 .agentCard { position:relative; z-index:1; }
-.agentChildren::before, .agentChildren > .agentCard::before, .agentChildren > .agentCard::after { display:none; }
 
 [data-theme="light"] .csCell:nth-child(1) .v { color:#087f73; }
 [data-theme="light"] .csCell:nth-child(3) .v { color:#7e22ce; }
@@ -828,9 +841,8 @@ dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self
 #tab-agent .fleetBanner .v { font-size:18px; }
 .agentWorkspace { display:grid; grid-template-columns:minmax(0,1.8fr) minmax(260px,1fr); align-items:start; gap:18px; }
 .agentWorkspace .agentGrid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:36px; align-items:center; padding:4px; }
-.agentWorkspace .agentLead { min-width:0; }
-.agentWorkspace .agentChildren { display:grid; grid-template-columns:minmax(0,1fr); min-width:0; gap:12px; padding:0; }
-.agentWorkspace .agentCard { width:100%; max-width:none; padding:10px 12px; }
+.agentWorkspace .agentTreeWrap { min-width:100%; }
+.agentWorkspace .agentCard { width:280px; max-width:none; padding:10px 12px; }
 .agentWorkspace .agentCard .an { white-space:normal; overflow-wrap:anywhere; line-height:1.4; }
 .agentWorkspace .agentCard .ah { align-items:flex-start; }
 .agentWorkspace .agentCard .ad { margin-top:4px; }

@@ -261,7 +261,7 @@ var state = {
   sessionId: null, ctx: null, browser: null, dna: "tree", trendMode: "total",
   fleet: null, trendSel: -1, lastActivity: 0, silent: false,
   expanded: new Set(), catPick: null, browserQuery: "", snapshot: "live", archive: "", day: null, trendKey: null, inspectorId: null, heatMode: "tokens", pick: null,
-  sessPage: 1, sessPageFor: null
+  sessPage: 1, sessPageFor: null, commsKind: "all", workPhase: "all"
 };
 function callTool(name, args) {
   return window.__bridgeCall("tools/call", { name: name, arguments: args || {} }).then(function (r) {
@@ -432,6 +432,7 @@ async function loadInsights(silent) {
     if (ticket !== requestTickets.insights || range !== state.range) return;
     state.insights = data; state.insightsAt = Date.now();
     state.sessions = data.sessions || [];
+    invalidateDaySessions(); /* get_insights 刷新：当日会话集缓存整体失效，随后的 renderSessions 按需经 get_day_sessions 重建 */
     renderInsights(); fillSessionSelect(); renderSessions();
     if (!silent) animateSwap(document.getElementById('insKpis'));
     showErr('insErr', null);

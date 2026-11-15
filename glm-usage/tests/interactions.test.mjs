@@ -78,16 +78,18 @@ test('scroll clears transient hover while preserving pinned requests and agents'
   assert.equal(r.state.hoverCat,null); assert.equal(r.state.catPick,'system');
   assert(calls.includes('updateTrendPick')); assert(calls.includes('renderAgentInspector'));
 });
-test('fleet connectors follow horizontal and folded card geometry', () => {
+test('fleet connectors draw bezier curves across tree columns', () => {
   const parent={left:10,top:20,width:100,height:80,right:110,bottom:100};
+  const svg={setAttribute(){}},lead={getBoundingClientRect:()=>parent};
+  const wrap={getBoundingClientRect:()=>({left:10,top:20,width:420,height:300})};
   for(const [child,expected] of [
-    [{left:146,top:20,width:100,height:80},'M 100 40 C 118 40 118 40 136 40'],
-    [{left:10,top:128,width:100,height:80},'M 50 80 C 50 94 50 94 50 108'],
+    [{left:146,top:20,width:100,height:80,right:246,bottom:100},'M 100 40 C 114.5 40 114.5 40 129 40'],
+    [{left:146,top:128,width:100,height:80,right:246,bottom:208},'M 100 40 C 114.5 40 114.5 148 129 148'],
   ]) {
-    const svg={setAttribute(){}},lead={getBoundingClientRect:()=>parent};
     const member={dataset:{agent:'child'},getBoundingClientRect:()=>child};
-    const grid={offsetWidth:300,getBoundingClientRect:()=>({left:10,top:20,width:300,height:220}),querySelector:()=>lead,querySelectorAll:()=>[member]};
+    const grid={offsetWidth:300,getBoundingClientRect:()=>({left:10,top:20,width:420,height:300}),querySelector:s=>s==='.treeRoot > .agentCard'?lead:(s==='.agentTreeWrap'?wrap:null),querySelectorAll:()=>[member]};
     const r=runtime({getElementById:id=>id==='fleetGrid'?grid:svg,querySelectorAll:()=>[]});
+    r.state.fleet={lead:{id:'root'},members:[{id:'child',parent_id:'root'}]};
     let rendered='';r.patchHTML=(_id,html)=>{rendered=html;};r.drawFleetEdges();
     assert(rendered.includes(expected));assert(rendered.includes('data-edge="child"'));
   }

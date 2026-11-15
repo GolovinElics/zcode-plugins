@@ -1,4 +1,23 @@
 /* Geometry and coordinated chart interactions, adapted from dsh-context v0.84.1. */
+/* 按需日筛选：get_insights 响应不再内联 session_ids，点日期后经 get_day_sessions({ day }) 按需查询并在此缓存（day → Set）。
+   get_insights 每次刷新调用 invalidateDaySessions() 整体失效（app.js loadInsights 成功路径）；未命中时 renderSessions 先以
+   dateKey(s.updated)===day 兜底渲染，再异步取数修正（不阻塞渲染）。 */
+const daySessionsCache = new Map();
+const daySessionsPending = new Set(); /* 在途日期去重：同一天最多一个并发请求（对应 requestTickets/inFlight 的 inFlight 角色） */
+async function requestDaySessions(day) {
+  if (daySessionsPending.has(day)) return;
+  daySessionsPending.add(day);
+  try {
+    const data = await callTool('get_day_sessions', { day });
+    daySessionsPending.delete(day);
+    daySessionsCache.set(day, new Set(Array.isArray(data?.session_ids) ? data.session_ids : []));
+    if (state.day !== day) return; /* 迟到丢弃：日期已切换/取消时不再触发重渲染（结果仍入缓存备复用） */
+    renderSessions();
+  } catch (e) {
+    daySessionsPending.delete(day); /* 失败静默降级：保持 dateKey 兜底结果，不提示、不缓存，下次渲染按需重试 */
+  }
+}
+function invalidateDaySessions() { daySessionsCache.clear(); }
 function donut(segs, centerTop, centerSub, size = 118) {
   const total = segs.reduce((a, s) => a + Math.max(0, Number(s.v) || 0), 0);
   let acc = 0;
@@ -88,8 +107,12 @@ function renderSessions() {
   all.forEach(s => { const key = groupKeyOf(s); groups.set(key, (groups.get(key) || 0) + 1); });
   patchHTML('sessGroups', `<button class="gchip ${!state.group ? 'on' : ''}" data-group="" aria-pressed="${!state.group}">全部 <b>${all.length}</b></button>` + [...groups].map(([key, n]) => `<button class="gchip ${state.group === key ? 'on' : ''}" data-group="${esc(key)}" data-tip="${esc(groupTip(key))}" aria-pressed="${state.group === key}">${esc(groupLabel(key))} <b>${n}</b></button>`).join(''));
   if (state.group && !all.some(s => groupKeyOf(s) === state.group)) state.group = '';
-  const dayRecord = [...(state.insights?.daily || []), ...(state.insights?.heatmap || [])].find(x => x.day === state.day);
-  const daySessions = dayRecord?.session_ids ? new Set(Array.isArray(dayRecord.session_ids) ? dayRecord.session_ids : dayRecord.session_ids.split(',')) : null;
+  /* 日筛选数据源：day 为空 → 不过滤；缓存命中 → 直接用；未命中 → dateKey 兜底先行渲染并异步取数修正（requestDaySessions） */
+  let daySessions = null;
+  if (state.day) {
+    daySessions = daySessionsCache.get(state.day) || null;
+    if (!daySessions) requestDaySessions(state.day);
+  }
   let list = all.filter(s => (!state.group || groupKeyOf(s) === state.group) && (!state.archive || !s.archived)
     && (!state.search || `${s.title} ${s.directory} ${s.last_msg || ''} ${s.model || ''}`.toLowerCase().includes(state.search))
     && (!state.day || (daySessions ? daySessions.has(s.id) : dateKey(s.updated) === state.day))

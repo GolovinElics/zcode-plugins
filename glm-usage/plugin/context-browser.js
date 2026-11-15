@@ -98,16 +98,51 @@ function renderBrowser() {
 function agentCard(a, role) {
   const color = role === 'lead' ? '#14b8a6' : ['#6366f1', '#f59e0b', '#3b82f6'][Math.abs(hash(a.id)) % 3];
   const pct = a.window ? a.context / a.window * 100 : 0;
-  return `<button class="agentCard ${role === 'lead' ? 'lead' : ''}" data-agent="${esc(a.id)}" style="--agent:${color}"><div class="ah"><span class="ad" style="background:${color}"></span><span class="an">${esc(a.title || a.id)}</span><span class="sPill">${role === 'lead' ? '主会话' : '子代理'}</span></div><div class="am">${esc(a.model || '未知模型')} · ${a.steps} 步</div><div class="agentValue">${cnum(a.context)}<span> / ${cnum(a.window)} tokens</span></div><div class="abar"><i style="width:${Math.min(pct, 100)}%;background:${color}"></i></div><div class="af"><span>累计 ${cnum(a.tokens)} tok</span><span>${pct.toFixed(1)}% 已用</span></div><div class="agentOpen">悬浮预览 · 点击固定 <span>⌖</span></div></button>`;
+  const state = `<span class="runState${a.running ? ' on' : ''}">${a.running ? '运行中' : '空闲'}</span>`;
+  return `<button class="agentCard ${role === 'lead' ? 'lead' : ''}" data-agent="${esc(a.id)}" style="--agent:${color}"><div class="ah"><span class="ad" style="background:${color}"></span><span class="an">${esc(a.title || a.id)}</span><span class="sPill">${role === 'lead' ? '主会话' : '子代理'}</span></div><div class="am">${esc(a.model || '未知模型')} · ${a.steps} 步</div><div class="agentValue">${cnum(a.context)}<span> / ${cnum(a.window)} tokens</span></div><div class="abar"><i style="width:${Math.min(pct, 100)}%;background:${color}"></i></div><div class="af"><span>累计 ${cnum(a.tokens)} tok</span><span>${pct.toFixed(1)}% 已用</span></div><div class="agentOpen">${state} · 悬浮预览 · 点击固定 <span>⌖</span></div></button>`;
 }
 function renderFleet() {
   const f = state.fleet; if (!f) return;
   const sm = f.summary || {}, members = f.members || [];
+  const leadId = f.lead?.id || null;
   patchHTML('fleetStats', [[sm.agents || 1, '会话'], [sm.running || 0, '近期活跃'], [sm.work_items || 0, '待办事项'], [sm.messages || 0, '模型请求']].map(([v, l]) => `<div class="st"><div class="v">${v}</div><div class="l">${l}</div></div>`).join(''));
-  patchHTML('fleetNodes', `<div class="agentLead">${f.lead ? agentCard(f.lead, 'lead') : ''}</div>${members.length ? `<div class="agentChildren">${members.map(m => agentCard(m, 'member')).join('')}</div>` : '<div class="empty">该主会话尚未派出子代理</div>'}`);
-  document.getElementById('fleetNetSub').textContent = `${members.length} 个直接子代理 · 悬浮预览 · 点击固定 · Esc 取消`;
+  /* 家族树渲染：横向思维导——根在左侧，子级按层级一列一列向右展开，贝塞尔曲线连接 */
+  const byParent = new Map();
+  for (const m of members) { const key = m.parent_id || leadId; if (!byParent.has(key)) byParent.set(key, []); byParent.get(key).push(m); }
+  const branch = (m) => `<div class="treeBranch">${agentCard(m, 'member')}${(byParent.get(m.id) || []).length ? `<div class="treeKids">${byParent.get(m.id).map(branch).join('')}</div>` : ''}</div>`;
+  const roots = byParent.get(leadId) || [];
+  patchHTML('fleetNodes', f.lead ? `<div class="treeBranch treeRoot">${agentCard(f.lead, 'lead')}${roots.length ? `<div class="treeKids">${roots.map(branch).join('')}</div>` : ''}</div>` : '<div class="empty">该主会话尚未派出子代理</div>');
+  const derived = members.length - roots.length;
+  document.getElementById('fleetNetSub').textContent = `${members.length} 个子代理${derived > 0 ? `（含 ${derived} 个下级派生）` : ''} · 悬浮预览 · 点击固定 · Esc 取消`;
   document.getElementById('fleetSub').textContent = `${members.length} 个 · 近期活跃按 3 分钟内更新估算`;
-  patchHTML('fleetMembers', members.map(m => `<button class="fleetRow" data-agent="${esc(m.id)}"><span class="avatar">${esc((m.title || '?')[0])}</span><span class="fleetInfo"><span class="fn">${esc(m.title)}</span><span class="fm">${esc(m.model || '未知模型')} · ${m.steps} 步 · ${durMs(m.model_ms)}</span></span><span class="fleetCtx"><span class="fx"><span>Context ${cnum(m.context)}</span><span>${(m.context / Math.max(1, m.window) * 100).toFixed(1)}%</span></span><span class="bar"><i style="width:${Math.min(100, m.context / Math.max(1, m.window) * 100)}%"></i></span></span><span>↗</span></button>`).join('') || '<div class="empty">子代理会话将显示在这里。</div>');
+  const depthOf = new Map();
+  for (const m of members) { let d = 0, p = m.parent_id; while (p && p !== leadId && d < 8) { d++; p = members.find(x => x.id === p)?.parent_id || null; } depthOf.set(m.id, d); }
+  patchHTML('fleetMembers', members.map(m => `<button class="fleetRow" data-agent="${esc(m.id)}"${depthOf.get(m.id) ? ` style="margin-left:${depthOf.get(m.id) * 16}px"` : ''}><span class="avatar">${esc((m.title || '?')[0])}</span><span class="fleetInfo"><span class="fn">${esc(m.title)}</span><span class="fm">${esc(m.model || '未知模型')} · ${m.steps} 步 · ${durMs(m.model_ms)}</span></span><span class="fleetCtx"><span class="fx"><span>Context ${cnum(m.context)}</span><span>${(m.context / Math.max(1, m.window) * 100).toFixed(1)}%</span></span><span class="bar"><i style="width:${Math.min(100, m.context / Math.max(1, m.window) * 100)}%"></i></span></span><span>↗</span></button>`).join('') || '<div class="empty">子代理会话将显示在这里。</div>');
+  /* 跨 Agent 协作：委派 / 消息记录，悬浮或点击可定位对应代理 */
+  const nameOf = new Map([[leadId, f.lead?.title || '主会话'], ...members.map(m => [m.id, m.title || m.id])]);
+  const comms = f.comms || [];
+  const kinds = [['all', '全部'], ['delegate', '委派'], ['message', '消息']];
+  const commsKind = state.commsKind || 'all';
+  patchHTML('commsChips', kinds.map(([k, label]) => `<button class="${commsKind === k ? 'on' : ''}" data-comms-kind="${k}" aria-pressed="${commsKind === k}">${label} <b>${k === 'all' ? comms.length : comms.filter(c => c.kind === k).length}</b></button>`).join(''));
+  const memberOf = id => members.find(m => m.id === id);
+  patchHTML('fleetComms', comms.filter(c => commsKind === 'all' || c.kind === commsKind).map(c => {
+    const owner = c.to && nameOf.get(c.to) ? c.to : c.from;
+    const target = c.to && nameOf.get(c.to) ? `${nameOf.get(c.from) || '?'} → ${nameOf.get(c.to)}` : nameOf.get(c.from) || '?';
+    const live = !!(c.to && memberOf(c.to)?.running);
+    return `<button class="commsRow" data-agent="${esc(owner)}"><span class="cKind ${c.kind}">${c.kind === 'delegate' ? '委派' : '消息'}</span><span class="cBody"><span class="cDesc" data-tip="${esc(c.description)}">${esc(c.description)}</span><span class="cMeta">${esc(target)} · ${agoTs(c.at)}${c.kind === 'delegate' ? ` · ${live ? '运行中' : '已委派'}` : ''}</span></span><span class="cdot${live ? ' live' : ''}"></span></button>`;
+  }).join('') || '<div class="empty">这个编队还没有跨 Agent 事件。</div>');
+  document.getElementById('fleetCommsSub').textContent = `${comms.length} 条记录`;
+  /* 协作任务：全家族待办三态分相 */
+  const works = f.works || [];
+  const phases = [['all', '全部'], ['in_progress', '运行中'], ['pending', '待处理'], ['completed', '已完成']];
+  const workPhase = state.workPhase || 'all';
+  const phaseText = s => s === 'completed' ? '已完成' : s === 'in_progress' ? '运行中' : '待处理';
+  patchHTML('workChips', phases.map(([p, label]) => `<button class="${workPhase === p ? 'on' : ''}" data-work-phase="${p}" aria-pressed="${workPhase === p}">${label} <b>${p === 'all' ? works.length : works.filter(w => w.status === p).length}</b></button>`).join(''));
+  patchHTML('fleetWork', works.filter(w => workPhase === 'all' || w.status === workPhase).map(w => {
+    const dot = w.status === 'completed' ? 'done' : w.status === 'in_progress' ? 'ongoing' : 'idle';
+    return `<button class="commsRow" data-agent="${esc(w.sid)}"><span class="wdot ${dot}"></span><span class="cBody"><span class="cDesc" data-tip="${esc(w.content)}">${esc(w.content)}</span><span class="cMeta">${esc(nameOf.get(w.sid) || '?')} · ${agoTs(w.at)}</span></span><span class="cState">${phaseText(w.status)}</span></button>`;
+  }).join('') || '<div class="empty">当前阶段没有协作任务。</div>');
+  document.getElementById('fleetWorkSub').textContent = `${works.length} 项`;
   const page = document.getElementById('tab-agent');
   const hover = target => {
     state.agentHover = target?.closest?.('[data-agent]')?.dataset.agent || null;
@@ -117,6 +152,10 @@ function renderFleet() {
   page.onpointerout = e => { if (!e.relatedTarget || !page.contains(e.relatedTarget)) hover(null); };
   page.onfocusin = e => hover(e.target);
   page.onfocusout = e => hover(e.relatedTarget);
+  const commsChips = document.getElementById('commsChips');
+  if (commsChips) commsChips.onclick = e => { const b = e.target.closest('[data-comms-kind]'); if (b) { state.commsKind = b.dataset.commsKind; renderFleet(); } };
+  const workChips = document.getElementById('workChips');
+  if (workChips) workChips.onclick = e => { const b = e.target.closest('[data-work-phase]'); if (b) { state.workPhase = b.dataset.workPhase; renderFleet(); } };
   const ids = [f.lead, ...members].filter(Boolean).map(a => a.id);
   if (!ids.includes(state.agentPick)) state.agentPick = null;
   if (!ids.includes(state.agentHover)) state.agentHover = null;
@@ -126,21 +165,25 @@ function renderFleet() {
 }
 
 function drawFleetEdges() {
-  const grid = document.getElementById('fleetGrid'), svg = document.getElementById('agentEdges'), lead = grid.querySelector('.agentLead .agentCard');
+  const grid = document.getElementById('fleetGrid'), svg = document.getElementById('agentEdges'), lead = grid.querySelector('.treeRoot > .agentCard');
   if (!svg || !lead || grid.offsetWidth === 0) return;
-  const box = grid.getBoundingClientRect(), parent = lead.getBoundingClientRect();
+  const wrap = grid.querySelector('.agentTreeWrap');
+  const box = (wrap || grid).getBoundingClientRect();
   svg.setAttribute('viewBox', `0 0 ${box.width} ${box.height}`);
-  patchHTML('agentEdges', [...grid.querySelectorAll('.agentChildren .agentCard')].map(el => {
-    const child = el.getBoundingClientRect();
-    const horizontal = child.left >= parent.right - 1;
-    const x1 = (horizontal ? parent.right : parent.left + parent.width / 2) - box.left;
-    const y1 = (horizontal ? parent.top + parent.height / 2 : parent.bottom) - box.top;
-    const x2 = (horizontal ? child.left : child.left + child.width / 2) - box.left;
-    const y2 = (horizontal ? child.top + child.height / 2 : child.top) - box.top;
-    const curve = horizontal
-      ? `${(x1 + x2) / 2} ${y1} ${(x1 + x2) / 2} ${y2}`
-      : `${x1} ${(y1 + y2) / 2} ${x2} ${(y1 + y2) / 2}`;
-    return `<g data-edge="${esc(el.dataset.agent)}"><path class="agentLink" d="M ${x1} ${y1} C ${curve} ${x2} ${y2}" fill="none" stroke="var(--bd2)" stroke-width="1.5"/><circle cx="${x2}" cy="${y2}" r="2.5" fill="var(--acc)"/></g>`;
+  const leadId = state.fleet?.lead?.id;
+  const byId = new Map([...grid.querySelectorAll('.agentCard[data-agent]')].map(el => [el.dataset.agent, el]));
+  const parentElOf = el => {
+    const m = (state.fleet?.members || []).find(x => x.id === el.dataset.agent);
+    if (!m || !m.parent_id || m.parent_id === leadId) return lead;
+    return byId.get(m.parent_id) || lead; /* 父代理卡片不在图内时回退连线到主会话 */
+  };
+  /* 横向思维导连线：父卡右缘中点 → 子卡左缘外侧 7px（端点与圆点露在卡外，明确归属） */
+  patchHTML('agentEdges', [...grid.querySelectorAll('.agentCard[data-agent]')].filter(el => el !== lead).map(el => {
+    const parentNode = parentElOf(el);
+    const parent = parentNode.getBoundingClientRect(), child = el.getBoundingClientRect();
+    const x1 = parent.right - box.left, y1 = parent.top + parent.height / 2 - box.top;
+    const x2 = child.left - 7 - box.left, y2 = child.top + child.height / 2 - box.top;
+    return `<g data-edge="${esc(el.dataset.agent)}"><path class="agentLink" d="M ${x1} ${y1} C ${(x1 + x2) / 2} ${y1} ${(x1 + x2) / 2} ${y2} ${x2} ${y2}" fill="none" stroke="var(--bd2)" stroke-width="1.5"/><circle cx="${x2}" cy="${y2}" r="3" fill="var(--acc)"/></g>`;
   }).join(''));
   highlightAgent();
 }
@@ -148,15 +191,28 @@ function drawFleetEdges() {
 function highlightAgent() {
   const active = state.agentHover || state.agentPick;
   const lead = state.fleet?.lead?.id;
+  /* 家族传播：悬浮/固定某个成员时，其全部下级派生代理与连线一并保持高亮 */
+  const kin = new Set();
+  if (active && active !== lead) {
+    const mem = state.fleet?.members || [];
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const m of mem) {
+        if (kin.has(m.id)) continue;
+        if (m.parent_id === active || kin.has(m.parent_id)) { kin.add(m.id); grew = true; }
+      }
+    }
+  }
   document.querySelectorAll('#tab-agent [data-agent]').forEach(el => {
     el.classList.toggle('agentHot', el.dataset.agent === active);
-    el.classList.toggle('agentDim', !!active && el.dataset.agent !== active && el.dataset.agent !== lead);
+    el.classList.toggle('agentDim', !!active && el.dataset.agent !== active && el.dataset.agent !== lead && !kin.has(el.dataset.agent));
     el.classList.toggle('agentPinned', el.dataset.agent === state.agentPick);
     el.setAttribute('aria-pressed', String(el.dataset.agent === state.agentPick));
   });
   document.querySelectorAll('[data-edge]').forEach(el => {
-    el.classList.toggle('edgeHot', !!active && (active === lead || el.dataset.edge === active));
-    el.classList.toggle('edgeDim', !!active && active !== lead && el.dataset.edge !== active);
+    el.classList.toggle('edgeHot', !!active && (active === lead || el.dataset.edge === active || kin.has(el.dataset.edge)));
+    el.classList.toggle('edgeDim', !!active && active !== lead && el.dataset.edge !== active && !kin.has(el.dataset.edge));
   });
 }
 function renderAgentInspector() {

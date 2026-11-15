@@ -39,7 +39,7 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* 回退 CLI 
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PANEL_URI = "ui://glm-usage/panel.html";
-const VERSION = "2.8.1";
+const VERSION = "2.8.2";
 const APP_VERSION = "3.18.2";
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8791"; // 仅当用户自建网页版时提示用，不作为依赖
 
@@ -51,6 +51,7 @@ const EMBEDDED_COOKIE_DB = path.join(HOME, "Library/Application Support/ZCode/se
 const DATA_DIR = process.env.GLM_USAGE_DATA_DIR || path.join(HOME, ".glm-usage");
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 const HISTORY_FILE = path.join(DATA_DIR, "history.json");
+const ACTIVITY_CACHE_FILE = path.join(DATA_DIR, "activity-cache.json"); // 命令/技能按天分桶物化
 
 // 上下文洞察数据源（只读）
 const ZCODE_DB = path.join(ZCODE_DIR, "cli/db/db.sqlite");
@@ -481,11 +482,288 @@ function rangeStart(range) {
   }
 }
 
-/* ---------- model-io JSONL 尾部读取（大文件安全：仅读末尾若干 MB） ---------- */
+/* ---------- part 维度统计的增量物化框架（~/.glm-usage/activity-cache.json） ----------
+ * part 全表 json_extract 是洞察页静默刷新（app.js 每 6 秒）的主要 CPU 开销：
+ * 本机 3 万行 ~110ms，600 万行外推 ~15s。这里把 commands/skills 统计按天分桶物化：
+ *   { version, watermark: 已处理的最大 part rowid, days: { "YYYY-MM-DD": { <store>: … } } }
+ * 每次 fetchInsights/fetchActivity(pick) 先看 MAX(rowid)：水位持平直接用桶；有新行只扫
+ * rowid > 水位的增量；缓存缺失/损坏/版本不符/水位回退（VACUUM 重建）时全量重建一次。
+ * 桶常驻内存，仅在水位推进时原子替换写盘。
+ * 注意口径：桶只增不减，会话删除后 all 范围可能轻微高估（近似口径，见 README）。
+ * 任何读写异常都降级回原直查路径，绝不让 get_insights/get_activity 失败。
+ *
+ * ---- 新增 part 维度统计（如 comms 协作记录）的最小接入方式 ----
+ * 1) 在 ACTIVITY_STORES 增加一个条目，例如：
+ *      comms: { init: () => new Map(), toJ: m => Object.fromEntries(m),
+ *               fromJ: o => { const m = new Map(); for (const [k, v] of Object.entries(o || {})) if (Number.isFinite(v)) m.set(k, v); return m; } }
+ * 2) 在 ACTIVITY_SCANS 增加一条增量扫描（SQL 必须带 p.rowid > ? AND p.rowid <= ? 双占位）：
+ *      { sql: `SELECT date(p.time_created/1000,'unixepoch','localtime') day, <键>, COUNT(*) n
+ *              FROM part p WHERE p.rowid > ? AND p.rowid <= ? AND <你的谓词> GROUP BY day, <键>`,
+ *        row: (r, b) => b.comms.set(r.键, (b.comms.get(r.键) || 0) + Number(r.n || 0)) }
+ * 3) ACTIVITY_CACHE_VERSION +1（旧缓存自动全量重建），按需写聚合读取函数（参考 activityTop/activityPickSessions）
+ */
 
-const _ioCache = new Map(); // file -> { size, mtime, entries: [最新在前，最多 2 条] }
+const ACTIVITY_CACHE_VERSION = 2;
+const ACTIVITY_NONE_DAY = "_none"; // time_created 为空的行无法按天分桶，仅在 insights 的 all 范围计入
+const PICK_SESSIONS_DAY_CAP = 400; // 单日单键的会话集合上限（与旧 pick 直查 LIMIT 语义同级的截断保护）
+let _activity = null;        // 常驻内存：{ version, watermark, days: Map<day, bucket> }
+let _activityDirty = false;
+
+function localDayStr(t) {
+  const d = new Date(t); const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/* 桶内存储：每类统计一个 store（init/toJ/fromJ 负责构造与 JSON 往返，键名即缓存 JSON 字段名） */
+const _countStore = {
+  init: () => new Map(),
+  toJ: (m) => Object.fromEntries(m),
+  fromJ: (o) => { const m = new Map(); for (const [k, v] of Object.entries(o || {})) { if (!Number.isFinite(v)) throw new Error("count 值非法"); m.set(String(k), v); } return m; },
+};
+const _idSetStore = {
+  init: () => new Map(),
+  toJ: (m) => Object.fromEntries([...m].map(([k, s]) => [k, [...s]])),
+  fromJ: (o) => { const m = new Map(); for (const [k, arr] of Object.entries(o || {})) { if (!Array.isArray(arr)) throw new Error("id 集合格式非法"); m.set(String(k), new Set(arr.map(String))); } return m; },
+};
+const ACTIVITY_STORES = {
+  commands: _countStore,        // 程序名 → 次数（洞察排行）
+  skills: _countStore,          // 技能名 → 次数（洞察排行）
+  skills_last: _countStore,     // 技能名 → 最后 time_created（排行 tiebreak）
+  cmd_sessions: _idSetStore,    // 程序名 → 当日会话 id 集合（commands pick）
+  skill_sessions: _idSetStore,  // 技能名 → 当日会话 id 集合（skills pick）
+};
+
+function emptyActivityDay() {
+  const b = {};
+  for (const [name, s] of Object.entries(ACTIVITY_STORES)) b[name] = s.init();
+  return b;
+}
+
+function activityDayBucket(day) {
+  let b = _activity.days.get(day);
+  if (!b) { b = emptyActivityDay(); _activity.days.set(day, b); }
+  return b;
+}
+
+function cmdProgramOf(cmd) {
+  return String(cmd || "").trim().split(/[\s;|&]/)[0].replace(/^.*\//, "") || "(空)";
+}
+
+/* 增量扫描：SQL 一律 `WHERE p.rowid > ? AND p.rowid <= ?`（水位双边界），row() 把一行合并进当日桶 */
+const ACTIVITY_SCANS = [
+  { // 命令次数（洞察排行；谓词与旧直查一致：LIKE 预滤 + command 非空）
+    sql: `SELECT date(p.time_created/1000,'unixepoch','localtime') day, json_extract(p.data,'$.state.input.command') cmd, COUNT(*) n
+      FROM part p WHERE p.rowid > ? AND p.rowid <= ? AND p.data LIKE '%"type":"tool"%'
+      AND json_extract(p.data,'$.state.input.command') IS NOT NULL GROUP BY day, cmd`,
+    row: (r, b) => { const prog = cmdProgramOf(r.cmd); b.commands.set(prog, (b.commands.get(prog) || 0) + Number(r.n || 0)); },
+  },
+  { // 技能次数 + 最后时间（洞察排行；谓词与旧直查一致）
+    sql: `SELECT date(p.time_created/1000,'unixepoch','localtime') day, COALESCE(json_extract(p.data,'$.state.input.skill'),'未知') name,
+        COUNT(*) calls, MAX(p.time_created) last_at
+      FROM part p WHERE p.rowid > ? AND p.rowid <= ? AND json_extract(p.data,'$.type')='tool'
+      AND json_extract(p.data,'$.tool')='Skill' GROUP BY day, name`,
+    row: (r, b) => {
+      const name = String(r.name || "未知");
+      b.skills.set(name, (b.skills.get(name) || 0) + Number(r.calls || 0));
+      b.skills_last.set(name, Math.max(b.skills_last.get(name) || 0, Number(r.last_at || 0)));
+    },
+  },
+  { // 命令 → 会话集合（commands pick；谓词与旧 pick 直查一致：type='tool' + command 非空）
+    sql: `SELECT date(p.time_created/1000,'unixepoch','localtime') day, json_extract(p.data,'$.state.input.command') cmd, p.session_id sid
+      FROM part p WHERE p.rowid > ? AND p.rowid <= ? AND json_extract(p.data,'$.type')='tool'
+      AND json_extract(p.data,'$.state.input.command') IS NOT NULL GROUP BY day, cmd, sid`,
+    row: (r, b) => {
+      const prog = cmdProgramOf(r.cmd);
+      let s = b.cmd_sessions.get(prog);
+      if (!s) { s = new Set(); b.cmd_sessions.set(prog, s); }
+      if (s.size < PICK_SESSIONS_DAY_CAP) s.add(String(r.sid || ""));
+    },
+  },
+  { // 技能 → 会话集合（skills pick；谓词与旧 pick 直查一致）
+    sql: `SELECT date(p.time_created/1000,'unixepoch','localtime') day, COALESCE(json_extract(p.data,'$.state.input.skill'),'未知') name, p.session_id sid
+      FROM part p WHERE p.rowid > ? AND p.rowid <= ? AND json_extract(p.data,'$.type')='tool'
+      AND json_extract(p.data,'$.tool')='Skill' AND json_extract(p.data,'$.state.input.skill') IS NOT NULL GROUP BY day, name, sid`,
+    row: (r, b) => {
+      const name = String(r.name || "未知");
+      let s = b.skill_sessions.get(name);
+      if (!s) { s = new Set(); b.skill_sessions.set(name, s); }
+      if (s.size < PICK_SESSIONS_DAY_CAP) s.add(String(r.sid || ""));
+    },
+  },
+];
+
+// 增量扫描 rowid ∈ (watermark, target] 的 part 行并按天合并进内存桶；返回新水位。
+// 上界 target 取扫描前的 MAX(rowid)：扫描期间新插入的行留给下一轮，保证每行只处理一次。
+function scanActivityDelta(watermark, target) {
+  for (const spec of ACTIVITY_SCANS) {
+    for (const r of q(spec.sql, [watermark, target])) spec.row(r, activityDayBucket(r.day || ACTIVITY_NONE_DAY));
+  }
+  return target;
+}
+
+// 从持久化文件载入内存桶；缺失/损坏/版本不符返回 null（调用方全量重建）
+function loadActivityCache() {
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(ACTIVITY_CACHE_FILE, "utf8")); }
+  catch (e) {
+    if (e.code !== "ENOENT") console.error(`[glm-usage] activity-cache.json 读取失败，全量重建: ${e.message}`);
+    return null;
+  }
+  try {
+    if (!raw || raw.version !== ACTIVITY_CACHE_VERSION || !Number.isSafeInteger(raw.watermark) ||
+        raw.watermark < 0 || !raw.days || typeof raw.days !== "object") return null;
+    const days = new Map();
+    for (const [day, b] of Object.entries(raw.days)) {
+      if ((!/^\d{4}-\d{2}-\d{2}$/.test(day) && day !== ACTIVITY_NONE_DAY) || !b || typeof b !== "object") return null;
+      const bucket = {};
+      for (const [name, store] of Object.entries(ACTIVITY_STORES)) bucket[name] = store.fromJ(b[name]);
+      days.set(day, bucket);
+    }
+    return { version: ACTIVITY_CACHE_VERSION, watermark: raw.watermark, days };
+  } catch (e) {
+    console.error(`[glm-usage] activity-cache.json 解析失败，全量重建: ${e.message}`);
+    return null;
+  }
+}
+
+// 原子替换写（对齐 view-store 写法）；失败保留内存桶与脏标记，下次水位推进时重试
+function saveActivityCache() {
+  if (!_activityDirty || !_activity) return;
+  const days = {};
+  for (const [day, b] of _activity.days) {
+    const out = {};
+    for (const [name, store] of Object.entries(ACTIVITY_STORES)) out[name] = store.toJ(b[name]);
+    days[day] = out;
+  }
+  const payload = JSON.stringify({ version: ACTIVITY_CACHE_VERSION, watermark: _activity.watermark, days });
+  const tmp = ACTIVITY_CACHE_FILE + ".tmp";
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(tmp, payload, { mode: 0o600 });
+    fs.renameSync(tmp, ACTIVITY_CACHE_FILE);
+    _activityDirty = false;
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch { /* 忽略 */ }
+    console.error(`[glm-usage] activity-cache.json 写盘失败（内存桶继续用，下次重试）: ${e.message}`);
+  }
+}
+
+// fetchInsights 入口调用：保证内存桶与 part 水位一致后返回
+function ensureActivityBuckets() {
+  const maxRowid = Number(q(`SELECT MAX(rowid) m FROM part`)[0]?.m || 0);
+  if (!_activity) {
+    _activity = loadActivityCache();
+    if (_activity && maxRowid < _activity.watermark) _activity = null; // 库被重建/回退，旧桶不可信
+  }
+  if (!_activity) {
+    _activity = { version: ACTIVITY_CACHE_VERSION, watermark: 0, days: new Map() };
+    _activityDirty = true;
+  }
+  if (maxRowid > _activity.watermark) {
+    _activity.watermark = scanActivityDelta(_activity.watermark, maxRowid);
+    _activityDirty = true;
+  }
+  saveActivityCache();
+  return _activity;
+}
+
+// 从按天桶聚合出范围 top 列表。from 为本地零点毫秒，与旧 SQL time_created >= from 等价于 day >= dayCut
+function activityTop(buckets, from) {
+  const dayCut = from > 0 ? localDayStr(from) : null;
+  const cmds = new Map(), skills = new Map(), lastAt = new Map();
+  for (const [day, b] of buckets.days) {
+    if (dayCut && (day === ACTIVITY_NONE_DAY || day < dayCut)) continue;
+    for (const [p, n] of b.commands) cmds.set(p, (cmds.get(p) || 0) + n);
+    for (const [name, c] of b.skills) skills.set(name, (skills.get(name) || 0) + c);
+    for (const [name, ts] of b.skills_last) lastAt.set(name, Math.max(lastAt.get(name) || 0, ts));
+  }
+  return {
+    commands: [...cmds.entries()].sort((a, b) => b[1] - a[1]).slice(0, 14).map(([program, count]) => ({ program, count })),
+    skills: [...skills.entries()].sort((a, b) => b[1] - a[1] || (lastAt.get(b[0]) || 0) - (lastAt.get(a[0]) || 0)).slice(0, 12)
+      .map(([name, calls]) => ({ name, calls, last_at: lastAt.get(name) || 0 })),
+  };
+}
+
+// 从按天桶聚合 pick 的会话 id 集合（commands/skills 单击筛选）。
+// 语义对齐旧 pick 直查：time_created >= from（from=0 时同样排除无时间戳行，故 _none 一律跳过）；
+// 单日单键 400 上限由扫描侧保证，聚合后以 4000 总量界报 truncated（对齐旧 LIMIT 4000 口径）。
+function activityPickSessions(kind, name, from) {
+  const dayCut = from > 0 ? localDayStr(from) : null;
+  const store = kind === "commands" ? "cmd_sessions" : "skill_sessions";
+  const ids = new Set(); let capped = false;
+  for (const [day, b] of _activity.days) {
+    if (day === ACTIVITY_NONE_DAY || (dayCut && day < dayCut)) continue;
+    const s = b[store].get(name);
+    if (!s) continue;
+    if (s.size >= PICK_SESSIONS_DAY_CAP) capped = true;
+    for (const id of s) ids.add(id);
+  }
+  return { session_ids: [...ids], truncated: capped || ids.size >= 4000 };
+}
+
+/* ---------- model-io JSONL 尾部读取（反向分块：从文件末尾按需向前扩块，大文件安全） ---------- */
+
+// 反向分块尾读：从文件末尾按 256KB 步长向前读块（凑不齐时 ×4 扩块：256KB→1MB→4MB→…），
+// 在已读窗口里自后向前找完整行（以 \n 界定），凑齐 want 条含 request.body 的完整 entry 即停；
+// 累计读取量不超过 capBytes（与旧整段尾读的上限一致，单行超块/找不到完整行时自然回退到大读）。
+// 窗口未达文件头时首行视为截断半行丢弃。返回 { entries（最新在前）, bytes（entry 行 UTF-8 字节合计）}。
+function readTailIoEntries(f, size, want, capBytes) {
+  const fd = fs.openSync(f, "r");
+  try {
+    const chunks = [];
+    let consumed = 0, step = 256 * 1024;
+    let entries = [], bytes = 0;
+    while (consumed < Math.min(size, capBytes)) {
+      const len = Math.min(step, size - consumed, capBytes - consumed);
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, size - consumed - len);
+      chunks.unshift(buf);
+      consumed += len;
+      const text = Buffer.concat(chunks).toString("utf8");
+      const lines = text.split("\n");
+      const head = size - consumed > 0 ? 1 : 0; // 窗口未达文件头时 lines[0] 是截断半行
+      entries = []; bytes = 0;
+      for (let i = lines.length - 1; i >= head && entries.length < want; i--) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        try {
+          const e = JSON.parse(line);
+          if (e && e.request && e.request.body) { entries.push(e); bytes += Buffer.byteLength(line, "utf8"); }
+        } catch { /* 半行或非请求行 */ }
+      }
+      if (entries.length >= want) break;
+      step *= 4; // 本块凑不齐（完整行不足或单行超块），扩块再向前读
+    }
+    return { entries, bytes };
+  } finally { fs.closeSync(fd); }
+}
+
+const _ioCache = new Map(); // file -> { size, mtimeMs, at, entries, bytes }（最新在尾部，LRU 逐出）
 const IO_TAIL_BYTES = 24 * 1024 * 1024; // 单条 entry 可能包含完整上下文，上限放宽
 const IO_CACHE_MS = 4000;
+const IO_CACHE_MAX_ENTRIES = 8;
+const IO_CACHE_MAX_BYTES = 64 * 1024 * 1024; // 估算字节（按源 JSON 行 UTF-8 长度）
+let _ioCacheBytes = 0;
+
+// 命中即刷新 LRU 位次（delete+set 移到尾部）；TTL 判定语义不变
+function ioCacheTouch(f) {
+  const c = _ioCache.get(f);
+  if (c) { _ioCache.delete(f); _ioCache.set(f, c); }
+}
+
+function ioCachePut(f, entry) {
+  const old = _ioCache.get(f);
+  if (old) { _ioCacheBytes -= old.bytes || 0; _ioCache.delete(f); }
+  _ioCache.set(f, entry);
+  _ioCacheBytes += entry.bytes || 0;
+  // 超出条目数 / 估算字节上限时从最旧端逐出；至少保留刚写入的一条
+  while (_ioCache.size > 1 && (_ioCache.size > IO_CACHE_MAX_ENTRIES || _ioCacheBytes > IO_CACHE_MAX_BYTES)) {
+    const oldest = _ioCache.keys().next().value;
+    if (oldest === f) break;
+    _ioCacheBytes -= _ioCache.get(oldest).bytes || 0;
+    _ioCache.delete(oldest);
+  }
+}
 
 // 会话 ID 仅允许安全字符：既防止 rollout 文件名路径穿越，也收敛 sqlite CLI 回退路径的注入面
 function validSessionId(id) {
@@ -503,35 +781,13 @@ function readIoEntries(sessionId, want = 2) {
   if (!f) return [];
   const st = fs.statSync(f);
   const c = _ioCache.get(f);
+  if (c) ioCacheTouch(f);
   if (c && c.size === st.size && c.mtimeMs === st.mtimeMs && Date.now() - c.at < IO_CACHE_MS) {
     return c.entries.slice(0, want);
   }
-  let text = "";
-  if (st.size <= IO_TAIL_BYTES) {
-    text = fs.readFileSync(f, "utf8");
-  } else {
-    const fd = fs.openSync(f, "r");
-    try {
-      const len = Math.min(IO_TAIL_BYTES, st.size);
-      const buf = Buffer.alloc(len);
-      fs.readSync(fd, buf, 0, len, st.size - len);
-      text = buf.toString("utf8");
-    } finally { fs.closeSync(fd); }
-    const nl = text.indexOf("\n");
-    if (nl >= 0) text = text.slice(nl + 1); // 丢弃被截断的半行
-  }
-  const lines = text.split("\n");
-  const entries = [];
-  for (let i = lines.length - 1; i >= 0 && entries.length < Math.max(want, 2); i--) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    try {
-      const e = JSON.parse(line);
-      if (e && e.request && e.request.body) entries.push(e);
-    } catch { /* 半行或非请求行 */ }
-  }
-  _ioCache.set(f, { size: st.size, mtimeMs: st.mtimeMs, at: Date.now(), entries });
-  return entries.slice(0, want);
+  const got = readTailIoEntries(f, st.size, Math.max(want, 2), IO_TAIL_BYTES);
+  ioCachePut(f, { size: st.size, mtimeMs: st.mtimeMs, at: Date.now(), entries: got.entries, bytes: got.bytes });
+  return got.entries.slice(0, want);
 }
 
 /* ---------- 上下文构成解析（七类，对标 dsh-context） ---------- */
@@ -557,35 +813,13 @@ function liveComposition(sessionId) {
   };
 }
 
-// 会话卡构成专用：只解析末行（8MB 尾部足够覆盖单条请求），避免整尾读取放大 IO
-function readLatestIoEntry(sessionId, maxBytes = 8 * 1024 * 1024) {
+// 会话卡构成专用：只取最新一条（反向分块，常态 <1MB；上限与 readIoEntries 对齐 24MB，
+// 单条 entry 超 8MB 的大会话卡片构成不再恒为空——只在真需要时才多读，缓存键 size+mtime 兜住重复读）
+function readLatestIoEntry(sessionId, maxBytes = IO_TAIL_BYTES) {
   const f = sessionIoFile(sessionId);
   if (!f) return null;
   const st = fs.statSync(f);
-  let text = "";
-  if (st.size <= maxBytes) {
-    text = fs.readFileSync(f, "utf8");
-  } else {
-    const fd = fs.openSync(f, "r");
-    try {
-      const len = Math.min(maxBytes, st.size);
-      const buf = Buffer.alloc(len);
-      fs.readSync(fd, buf, 0, len, st.size - len);
-      text = buf.toString("utf8");
-    } finally { fs.closeSync(fd); }
-    const nl = text.indexOf("\n");
-    if (nl >= 0) text = text.slice(nl + 1); // 丢弃被截断的半行
-  }
-  const lines = text.split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    try {
-      const e = JSON.parse(line);
-      if (e && e.request && e.request.body) return e;
-    } catch { /* 末行可能被截断，向前回退一条 */ }
-  }
-  return null;
+  return readTailIoEntries(f, st.size, 1, maxBytes).entries[0] || null;
 }
 
 /* ---------- 聚合查询 ---------- */
@@ -657,28 +891,32 @@ function fetchInsights(range) {
     if (allPriced) { kpis.priced = true; kpis.cost = Math.round(total * 10000) / 10000; }
   }
 
-  // ---- 逐日（活跃度 + 走势） ----
-  const dailyWithCost = (rngSql, prm) => {
+  // ---- 逐日（活跃度 + 走势 + 近 7 天卡）：一次按天聚合，起点取范围起点与 7 天起点中更早者 ----
+  const mergedFrom = from > 0 ? Math.min(from, rangeStart("7d")) : 0;
+  const mRng = mergedFrom > 0 ? "mu.started_at >= ?" : "1=1";
+  const mParams = mergedFrom > 0 ? [mergedFrom] : [];
+  const dailyRowsAll = (() => {
     const rows = q(`SELECT date(mu.started_at/1000,'unixepoch','localtime') day,
         SUM(mu.computed_total_tokens) tokens, SUM(mu.input_tokens) input_t, SUM(mu.output_tokens) output_t,
-        SUM(mu.cache_read_input_tokens) cache_read, COUNT(*) steps, COUNT(DISTINCT mu.session_id) sessions, GROUP_CONCAT(DISTINCT mu.session_id) session_ids,
+        SUM(mu.cache_read_input_tokens) cache_read, COUNT(*) steps, COUNT(DISTINCT mu.session_id) sessions,
         SUM(mu.duration_ms) model_ms, SUM(mu.time_to_first_token_ms) ttft_ms
-      FROM model_usage mu WHERE ${rngSql} AND mu.query_source != 'session_title'
-      GROUP BY day ORDER BY day`, prm);
+      FROM model_usage mu WHERE ${mRng} AND mu.query_source != 'session_title'
+      GROUP BY day ORDER BY day`, mParams);
     // 逐日费用：仅累计配置了价格的模型，未计价模型不计入也不清零当日（对齐上游"仅含支持计价映射的模型"口径）
     const costMap = new Map();
     for (const r of q(`SELECT date(mu.started_at/1000,'unixepoch','localtime') day, mu.model_id model_id,
         SUM(mu.input_tokens) input_t, SUM(mu.output_tokens) output_t
-      FROM model_usage mu WHERE ${rngSql} AND mu.query_source != 'session_title'
-      GROUP BY day, mu.model_id`, prm)) {
+      FROM model_usage mu WHERE ${mRng} AND mu.query_source != 'session_title'
+      GROUP BY day, mu.model_id`, mParams)) {
       const c = costOf(r.model_id, r.input_t, r.output_t);
       if (c != null) costMap.set(r.day, (costMap.get(r.day) || 0) + c);
     }
-    return rows.map((r) => ({ ...r, tokens: Number(r.tokens || 0), input_t: Number(r.input_t || 0), output_t: Number(r.output_t || 0), cache_read: Number(r.cache_read || 0), steps: Number(r.steps || 0), sessions: Number(r.sessions || 0), cost: Math.round((costMap.get(r.day) || 0) * 10000) / 10000 }));
-  };
-  const daily = dailyWithCost(rng, params);
+    return rows.map((r) => ({ day: r.day, tokens: Number(r.tokens || 0), input_t: Number(r.input_t || 0), output_t: Number(r.output_t || 0), cache_read: Number(r.cache_read || 0), steps: Number(r.steps || 0), sessions: Number(r.sessions || 0), cost: Math.round((costMap.get(r.day) || 0) * 10000) / 10000 }));
+  })();
   // 近 7 天用量卡固定展示最近 7 天，不随全局范围筛选变化（对齐上游 dsh-context）
-  const daily7 = dailyWithCost("mu.started_at >= ?", [rangeStart("7d")]);
+  const daily7 = dailyRowsAll.filter((r) => r.day >= localDayStr(rangeStart("7d")));
+  const dayCut = from > 0 ? localDayStr(from) : null;
+  const daily = dayCut ? dailyRowsAll.filter((r) => r.day >= dayCut) : dailyRowsAll;
 
   // ---- 按模型 ----
   const models = q(`SELECT mu.model_id,
@@ -697,41 +935,43 @@ function fetchInsights(range) {
     FROM tool_usage tu WHERE ${rng.replace(/mu\./g, "tu.")}
     GROUP BY tool_name ORDER BY calls DESC LIMIT 14`, params).map((r) => ({ ...r, calls: Number(r.calls || 0) }));
 
-  // ---- 命令执行（从 part 里提取 Bash 命令的首词） ----
-  let commands = [];
+  // ---- 命令执行 / 技能加载（按天分桶增量物化，读写异常降级回下面的直查路径） ----
+  let commands = [], skills = [];
   try {
-    const prng = from > 0 ? "p.time_created >= ?" : "1=1";
-    const rows = q(`SELECT json_extract(p.data,'$.state.input.command') cmd, COUNT(*) n
-      FROM part p WHERE ${prng} AND p.data LIKE '%"type":"tool"%'
-      AND json_extract(p.data,'$.state.input.command') IS NOT NULL
-      GROUP BY 1 ORDER BY n DESC LIMIT 1500`, params);
-    const agg = new Map();
-    for (const r of rows) {
-      const first = String(r.cmd || "").trim().split(/[\s;|&]/)[0];
-      const prog = first.replace(/^.*\//, "") || "(空)";
-      agg.set(prog, (agg.get(prog) || 0) + Number(r.n || 0));
-    }
-    commands = [...agg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 14).map(([program, count]) => ({ program, count }));
-  } catch { /* part 结构变化时降级 */ }
-
-  // ---- 技能加载（对齐 dsh 技能卡：Skill 工具调用，技能名取自 part.state.input.skill）----
-  let skills = [];
-  try {
-    const prng = from > 0 ? "p.time_created >= ?" : "1=1";
-    skills = q(`SELECT COALESCE(json_extract(p.data,'$.state.input.skill'),'未知') name,
-        COUNT(*) calls, MAX(p.time_created) last_at
-      FROM part p WHERE ${prng} AND json_extract(p.data,'$.type')='tool'
-      AND json_extract(p.data,'$.tool')='Skill'
-      GROUP BY 1 ORDER BY calls DESC, last_at DESC LIMIT 12`, params)
-      .map((r) => ({ name: String(r.name || "未知"), calls: Number(r.calls || 0), last_at: Number(r.last_at || 0) }));
-  } catch { /* part 结构变化时降级 */ }
+    ({ commands, skills } = activityTop(ensureActivityBuckets(), from));
+  } catch (e) {
+    console.error(`[glm-usage] 命令/技能分桶不可用，回退直查: ${e.message}`);
+    try {
+      const prng = from > 0 ? "p.time_created >= ?" : "1=1";
+      const rows = q(`SELECT json_extract(p.data,'$.state.input.command') cmd, COUNT(*) n
+        FROM part p WHERE ${prng} AND p.data LIKE '%"type":"tool"%'
+        AND json_extract(p.data,'$.state.input.command') IS NOT NULL
+        GROUP BY 1 ORDER BY n DESC LIMIT 1500`, params);
+      const agg = new Map();
+      for (const r of rows) {
+        const first = String(r.cmd || "").trim().split(/[\s;|&]/)[0];
+        const prog = first.replace(/^.*\//, "") || "(空)";
+        agg.set(prog, (agg.get(prog) || 0) + Number(r.n || 0));
+      }
+      commands = [...agg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 14).map(([program, count]) => ({ program, count }));
+    } catch { /* part 结构变化时降级 */ }
+    try {
+      const prng = from > 0 ? "p.time_created >= ?" : "1=1";
+      skills = q(`SELECT COALESCE(json_extract(p.data,'$.state.input.skill'),'未知') name,
+          COUNT(*) calls, MAX(p.time_created) last_at
+        FROM part p WHERE ${prng} AND json_extract(p.data,'$.type')='tool'
+        AND json_extract(p.data,'$.tool')='Skill'
+        GROUP BY 1 ORDER BY calls DESC, last_at DESC LIMIT 12`, params)
+        .map((r) => ({ name: String(r.name || "未知"), calls: Number(r.calls || 0), last_at: Number(r.last_at || 0) }));
+    } catch { /* part 结构变化时降级 */ }
+  }
 
   // ---- 活跃度热力图（固定近 84 天，不受 range 影响；展示取 8 周对齐 dsh） ----
   const heatmap = q(`SELECT date(mu.started_at/1000,'unixepoch','localtime') day,
-      SUM(mu.computed_total_tokens) tokens, COUNT(*) steps, COUNT(DISTINCT mu.session_id) sessions, GROUP_CONCAT(DISTINCT mu.session_id) session_ids
+      SUM(mu.computed_total_tokens) tokens, COUNT(*) steps, COUNT(DISTINCT mu.session_id) sessions
     FROM model_usage mu
     WHERE mu.started_at >= ? AND mu.query_source != 'session_title'
-    GROUP BY day ORDER BY day`, [Date.now() - 84 * 864e5]).map((r) => ({ day: r.day, tokens: Number(r.tokens || 0), steps: Number(r.steps || 0), sessions: Number(r.sessions || 0), session_ids: r.session_ids || "" }));
+    GROUP BY day ORDER BY day`, [Date.now() - 84 * 864e5]).map((r) => ({ day: r.day, tokens: Number(r.tokens || 0), steps: Number(r.steps || 0), sessions: Number(r.sessions || 0) }));
 
   // ---- 会话卡片 ----
   const srng = (alias) => (from > 0 ? `AND ${alias}.started_at >= ?` : "");
@@ -743,8 +983,9 @@ function fetchInsights(range) {
       (SELECT SUM(m3.computed_total_tokens) FROM model_usage m3 WHERE m3.session_id = s.id ${srng("m3")}) tokens,
       (SELECT SUM(m4.output_tokens) FROM model_usage m4 WHERE m4.session_id = s.id ${srng("m4")}) output_t,
       (SELECT SUM(m5.duration_ms) FROM model_usage m5 WHERE m5.session_id = s.id ${srng("m5")}) model_ms,
-      (SELECT m6.model_id FROM model_usage m6 WHERE m6.session_id = s.id AND m6.query_source != 'session_title' ORDER BY m6.started_at DESC LIMIT 1) last_model,
-      (SELECT m7.input_tokens FROM model_usage m7 WHERE m7.session_id = s.id AND m7.query_source != 'session_title' ORDER BY m7.started_at DESC LIMIT 1) last_ctx,
+      -- 最近请求优先取 completed（取消/出错行用量全零，会让会话卡上下文显示 0）；id 兜底保证 model/ctx 取同一行
+      (SELECT m6.model_id FROM model_usage m6 WHERE m6.session_id = s.id AND m6.query_source != 'session_title' ORDER BY (m6.status='completed') DESC, m6.started_at DESC, m6.id DESC LIMIT 1) last_model,
+      (SELECT m7.input_tokens FROM model_usage m7 WHERE m7.session_id = s.id AND m7.query_source != 'session_title' ORDER BY (m7.status='completed') DESC, m7.started_at DESC, m7.id DESC LIMIT 1) last_ctx,
       (SELECT m8.id FROM message m8 WHERE m8.session_id = s.id AND COALESCE(json_extract(m8.data,'$.metadata.visibility'),'') != 'model-only' ORDER BY m8.time_created DESC LIMIT 1) last_msg_id,
       (SELECT json_extract(m9.data,'$.role') FROM message m9 WHERE m9.session_id = s.id AND COALESCE(json_extract(m9.data,'$.metadata.visibility'),'') != 'model-only' ORDER BY m9.time_created DESC LIMIT 1) last_msg_role
     FROM session s
@@ -980,12 +1221,52 @@ function fetchFleet(sessionId) {
     if (!parent) break;
     root = parent;
   }
-  const member = (row) => {
-    const agg = q(`SELECT COUNT(*) steps, SUM(computed_total_tokens) tokens, SUM(duration_ms) model_ms,
+  const nowMs = Date.now();
+  const kidRows = q(`SELECT * FROM session WHERE parent_id = ? AND time_deleted IS NULL ORDER BY time_created ASC`, [root.id]);
+  // 家族成员：递归收集全部后代——子代理（或 side chat）再派生的代理也纳入编队
+  const memberRows = [];
+  const seen = new Set([root.id]);
+  const queue = [...kidRows];
+  while (queue.length) {
+    const row = queue.shift();
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    memberRows.push(row);
+    for (const grand of q(`SELECT * FROM session WHERE parent_id = ? AND time_deleted IS NULL ORDER BY time_created ASC`, [row.id])) queue.push(grand);
+  }
+  const ids = [root.id, ...memberRows.map((k) => k.id)];
+  // 编队成员用量批量聚合：每成员 2 条查询合并为整个家族 2 条 IN 查询（消除 N+1；>400 分片）
+  const aggById = new Map();  // session_id -> { steps, tokens, model_ms, input_t, output_t }
+  const lastById = new Map(); // session_id -> { model_id, input_tokens }
+  for (let i = 0; i < ids.length; i += 400) {
+    const chunk = ids.slice(i, i + 400);
+    const cph = chunk.map(() => "?").join(",");
+    for (const r of q(`SELECT session_id, COUNT(*) steps, SUM(computed_total_tokens) tokens, SUM(duration_ms) model_ms,
         SUM(input_tokens) input_t, SUM(output_tokens) output_t
-      FROM model_usage WHERE session_id = ? AND query_source != 'session_title'`, [row.id])[0] || {};
-    const lastM = q(`SELECT model_id, input_tokens FROM model_usage WHERE session_id = ?
-        AND query_source != 'session_title' ORDER BY started_at DESC LIMIT 1`, [row.id])[0] || {};
+      FROM model_usage WHERE session_id IN (${cph}) AND query_source != 'session_title' GROUP BY session_id`, chunk)) {
+      aggById.set(r.session_id, r);
+    }
+    // 各成员最近一次模型请求：先按会话取 MAX(started_at)，再 JOIN 回取该行的 model_id/input_tokens（不依赖窗口函数）。
+    // 优先取成功（completed）请求——取消/出错/运行中的行用量全零，直接取最近一行会把卡片上下文显示成 0
+    // （如子代理被中止后卡片从 85.7k 变成 0 / 1.0M）；无成功请求的会话再回退取最近一行。
+    const lastSql = (cond, ph) => `SELECT m.session_id session_id, m.model_id model_id, m.input_tokens input_tokens
+      FROM model_usage m
+      JOIN (SELECT session_id, MAX(started_at) last_at FROM model_usage
+            WHERE session_id IN (${ph}) AND query_source != 'session_title'${cond} GROUP BY session_id) t
+        ON t.session_id = m.session_id AND t.last_at = m.started_at
+      WHERE m.query_source != 'session_title'${cond}`;
+    for (const r of q(lastSql(" AND status = 'completed'", cph), chunk)) {
+      lastById.set(r.session_id, r); // 同一 started_at 并列时任取一行（与旧 ORDER BY DESC LIMIT 1 的非确定性一致）
+    }
+    const missed = chunk.filter((id) => !lastById.has(id));
+    if (missed.length) {
+      const mph = missed.map(() => "?").join(",");
+      for (const r of q(lastSql("", mph), missed)) lastById.set(r.session_id, r);
+    }
+  }
+  const member = (row) => {
+    const agg = aggById.get(row.id) || {};
+    const lastM = lastById.get(row.id) || {};
     return {
       id: row.id, title: row.title, parent_id: row.parent_id || null,
       created: Number(row.time_created || 0), updated: Number(row.time_updated || 0),
@@ -993,18 +1274,39 @@ function fetchFleet(sessionId) {
       context: Number(lastM.input_tokens || 0), window: windowFor(lastM.model_id),
       model: lastM.model_id ? normModel(lastM.model_id) : null,
       cost: lastM.model_id ? costOf(lastM.model_id, agg.input_t, agg.output_t) : null,
+      running: nowMs - Number(row.time_updated || 0) < 3 * 60000,
     };
   };
-  const kids = q(`SELECT * FROM session WHERE parent_id = ? AND time_deleted IS NULL ORDER BY time_created ASC`, [root.id]).map(member);
-  // 家族汇总（对齐 dsh-context Fleet 头部：Agents / Running / Work items / Messages）
-  const ids = [root.id, ...kids.map((k) => k.id)];
+  const members = memberRows.map(member);
+  // 家族汇总（对齐 dsh-context Fleet 头部：Agents / Running / Work items / Messages，覆盖全部后代）
   const ph = ids.map(() => "?").join(",");
-  const inMsg = q(`SELECT COUNT(*) n FROM model_usage WHERE session_id IN (${ph}) AND query_source != 'session_title'`, ids)[0]?.n || 0;
+  // messages = 各成员请求数之和（与原 COUNT(*) IN 同口径，直接复用上面的批量结果）
+  let inMsg = 0;
+  for (const id of ids) inMsg += Number(aggById.get(id)?.steps || 0);
   const inTodos = q(`SELECT COUNT(*) n FROM todo WHERE session_id IN (${ph}) AND status != 'completed'`, ids)[0]?.n || 0;
-  const nowMs = Date.now();
-  const running = [root, ...kids].filter((s) => nowMs - Number(s.time_updated || s.updated || 0) < 3 * 60000).length;
+  const running = [root, ...memberRows].filter((s) => nowMs - Number(s.time_updated || s.updated || 0) < 3 * 60000).length;
+  // 跨 Agent 协作：Agent 派发 / SendMessage 消息；Agent 输出中的 agentId 可精确关联派生出的子会话
+  const comms = [];
+  for (const r of q(`SELECT p.session_id sid, p.time_created at, p.data
+      FROM part p WHERE p.session_id IN (${ph}) AND json_extract(p.data,'$.tool') IN ('Agent','SendMessage')
+      ORDER BY p.time_created DESC LIMIT 200`, ids)) {
+    let d; try { d = JSON.parse(r.data); } catch { continue; }
+    const input = d.state?.input || {};
+    const to = (String(d.state?.output || '').match(/agentId:\s*agent_([0-9a-f-]+)/) || [])[1];
+    comms.push({
+      from: r.sid, to: to ? `sess_subagent_agent_${to}` : null,
+      kind: d.tool === 'Agent' ? 'delegate' : 'message',
+      description: String(input.description || input.content || input.message || input.text || '').slice(0, 160) || '(无描述)',
+      status: String(d.state?.status || 'unknown'), at: Number(r.at),
+    });
+  }
+  comms.reverse();
+  // 协作任务：全家族待办（三态与任务分相对齐）
+  const works = q(`SELECT t.session_id sid, t.content, t.status, t.priority, t.time_updated at
+      FROM todo t WHERE t.session_id IN (${ph}) ORDER BY t.time_updated DESC LIMIT 300`, ids)
+    .map((r) => ({ sid: r.sid, content: String(r.content || '').slice(0, 200), status: String(r.status || 'pending'), priority: String(r.priority || ''), at: Number(r.at) }));
   return {
-    lead: member(root), members: kids,
+    lead: member(root), members, comms, works,
     summary: { agents: ids.length, running, work_items: Number(inTodos || 0), messages: Number(inMsg || 0) },
   };
 }
@@ -1022,12 +1324,21 @@ function fetchActivity(args = {}) {
       const ids = q(`SELECT DISTINCT session_id FROM tool_usage WHERE tool_name = ? AND started_at >= ? LIMIT 4000`, [args.pick, from]);
       return { kind, pick: args.pick, session_ids: ids.map((r) => r.session_id), truncated: ids.length >= 4000 };
     }
-    if (kind === "skills") {
-      const ids = q(`SELECT DISTINCT session_id FROM part WHERE json_extract(data,'$.type')='tool'
-          AND json_extract(data,'$.tool')='Skill' AND json_extract(data,'$.state.input.skill') = ? AND time_created >= ? LIMIT 4000`, [args.pick, from]);
-      return { kind, pick: args.pick, session_ids: ids.map((r) => r.session_id), truncated: ids.length >= 4000 };
-    }
-    if (kind === "commands") {
+    // skills/commands 的 pick 优先走物化日分桶（毫秒级，part 无 time_created 索引的直查在
+    // 大库窄范围会退化成全表扫）；任何异常降级回原直查路径
+    if (kind === "skills" || kind === "commands") {
+      try {
+        ensureActivityBuckets();
+        const r = activityPickSessions(kind, kind === "commands" ? cmdProgramOf(args.pick) : args.pick, from);
+        return { kind, pick: args.pick, session_ids: r.session_ids, truncated: r.truncated };
+      } catch (e) {
+        console.error(`[glm-usage] pick(${kind}) 物化路径失败，降级直查: ${e.message}`);
+      }
+      if (kind === "skills") {
+        const ids = q(`SELECT DISTINCT session_id FROM part WHERE json_extract(data,'$.type')='tool'
+            AND json_extract(data,'$.tool')='Skill' AND json_extract(data,'$.state.input.skill') = ? AND time_created >= ? LIMIT 4000`, [args.pick, from]);
+        return { kind, pick: args.pick, session_ids: ids.map((r) => r.session_id), truncated: ids.length >= 4000 };
+      }
       const rows = q(`SELECT DISTINCT session_id, json_extract(data,'$.state.input.command') cmd FROM part
           WHERE json_extract(data,'$.type')='tool' AND json_extract(data,'$.state.input.command') IS NOT NULL AND time_created >= ? LIMIT 20000`, [from]);
       const ids = [];
@@ -1038,23 +1349,70 @@ function fetchActivity(args = {}) {
       return { kind, pick: args.pick, session_ids: ids, truncated: rows.length >= 20000 };
     }
   }
+  // 两段式：第一步仅查 tool_usage（started_at / session 索引，毫秒级）；
+  // 第二步只对这 ≤501 行涉及的会话集合 + 时间窗批量取 part 明细（走 part_session_idx），
+  // JS 侧按 (session_id, callID) 关联、同 callID 多 part 去重取一。
+  // 避免旧实现的全表 part LEFT JOIN json_extract（30 天范围约 4 秒）。
   const where = sid ? "tu.session_id = ?" : "tu.started_at >= ?";
   const params = [sid || from];
-  const cmd = "json_extract(p.data,'$.state.input.command')";
-  const file = "coalesce(json_extract(p.data,'$.state.input.file_path'),json_extract(p.data,'$.state.input.path'))";
-  const skill = "json_extract(p.data,'$.state.input.skill')";
-  const filter = kind === "commands" ? `AND ${cmd} IS NOT NULL` : kind === "files" ? `AND ${file} IS NOT NULL` : kind === "skills" ? `AND tu.tool_name='Skill' AND ${skill} IS NOT NULL` : "";
-  const rows = q(`SELECT tu.id, tu.session_id, tu.tool_name name, tu.status, tu.started_at ts,
-      tu.duration_ms dur, tu.exit_code, tu.error_type, tu.output_bytes,
-      ${cmd} command, ${file} file, ${skill} skill,
-      json_extract(p.data,'$.state.input.run_in_background') background
-    FROM tool_usage tu LEFT JOIN part p ON p.session_id=tu.session_id AND json_extract(p.data,'$.callID')=tu.tool_call_id
-    WHERE ${where} ${filter} ORDER BY tu.started_at DESC LIMIT 501`, params);
-  return { kind, truncated: rows.length > 500, limit: 500,
-    rows: rows.slice(0, 500).map(r => ({ ...r, ts: Number(r.ts), dur: Number(r.dur || 0),
+  const rows = q(`SELECT tu.id, tu.session_id, tu.tool_call_id, tu.tool_name name, tu.status, tu.started_at ts,
+      tu.duration_ms dur, tu.exit_code, tu.error_type, tu.output_bytes
+    FROM tool_usage tu WHERE ${where} ${kind === "skills" ? "AND tu.tool_name='Skill'" : ""}
+    ORDER BY tu.started_at DESC LIMIT 501`, params);
+  const enrich = new Map(); // "session_id|callID" -> { command, file, skill, background }
+  if (rows.length) {
+    let minTs = Infinity, maxTs = -Infinity;
+    for (const r of rows) { const t = Number(r.ts) || 0; if (t < minTs) minTs = t; if (t > maxTs) maxTs = t; }
+    const win = 30 * 60000; // part 创建时间与工具调用相近，±30 分钟窗口足够覆盖偏差
+    const sessions = [...new Set(rows.map((r) => r.session_id))];
+    const cmd = "json_extract(p.data,'$.state.input.command')";
+    const file = "coalesce(json_extract(p.data,'$.state.input.file_path'),json_extract(p.data,'$.state.input.path'))";
+    const skill = "json_extract(p.data,'$.state.input.skill')";
+    for (let i = 0; i < sessions.length; i += 200) {
+      const chunk = sessions.slice(i, i + 200);
+      const ph = chunk.map(() => "?").join(",");
+      for (const p of q(`SELECT p.session_id session_id, json_extract(p.data,'$.callID') call_id,
+          ${cmd} command, ${file} file, ${skill} skill,
+          json_extract(p.data,'$.state.input.run_in_background') background
+        FROM part p WHERE p.session_id IN (${ph}) AND p.time_created >= ? AND p.time_created <= ?
+          AND p.data LIKE '%callID%'`, [...chunk, minTs - win, maxTs + win])) {
+        if (!p.call_id) continue;
+        const key = p.session_id + "|" + p.call_id;
+        if (!enrich.has(key)) enrich.set(key, p); // 同 callID 多 part 去重取一
+      }
+    }
+  }
+  const joined = rows.map((r) => {
+    const e = enrich.get(r.session_id + "|" + (r.tool_call_id ?? "")) || {};
+    const { tool_call_id, ...rest } = r; // 输出字段与旧结构一致，不外泄 join 键
+    return { ...rest, command: e.command ?? null, file: e.file ?? null, skill: e.skill ?? null, background: !!e.background };
+  });
+  // 原 SQL 对 commands / files / skills 三类按 part 明细过滤，关联后在 JS 侧保持同一口径
+  const filtered = kind === "commands" ? joined.filter((r) => r.command != null)
+    : kind === "files" ? joined.filter((r) => r.file != null)
+    : kind === "skills" ? joined.filter((r) => r.skill != null)
+    : joined;
+  return { kind, truncated: filtered.length > 500, limit: 500,
+    rows: filtered.slice(0, 500).map(r => ({ ...r, ts: Number(r.ts), dur: Number(r.dur || 0),
       command: r.command ? String(r.command).slice(0, 8000) : null,
       program: r.command ? String(r.command).trim().split(/[\s;|&]/)[0].replace(/^.*\//, "") : r.name,
       background: !!r.background })) };
+}
+
+// 某一天（本地时区）有 model_usage 记录的去重会话 id 列表（排除 query_source='session_title'）。
+// 按 started_at 索引做当日范围扫描，毫秒级；daily/heatmap 不再返回 session_ids 明细，前端按天补查走这里。
+function fetchDaySessions(day) {
+  const ds = String(day || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ds)) throw new Error("day 需为 YYYY-MM-DD（本地日期）");
+  const [y, m, d] = ds.split("-").map(Number);
+  const dt = new Date(2000, m - 1, d); // 先用安全年份构造，再 setFullYear 避开两位数年份映射
+  dt.setFullYear(y);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) throw new Error("无效日期");
+  openDb();
+  const start = dt.getTime(); // 本地当日零点
+  const rows = q(`SELECT DISTINCT session_id FROM model_usage
+    WHERE started_at >= ? AND started_at < ? AND query_source != 'session_title'`, [start, start + 864e5]);
+  return { day: ds, session_ids: rows.map((r) => r.session_id) };
 }
 
 /* ---------- 面板与图标 ---------- */
@@ -1138,6 +1496,12 @@ const TOOLS = [
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
   {
+    name: "get_day_sessions",
+    description: "List deduplicated local session ids that have model usage records on one calendar day (local time). Read-only, local.",
+    inputSchema: { type: "object", properties: { day: { type: "string", description: "Local calendar day in YYYY-MM-DD" } }, required: ["day"], additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+  {
     name: "get_context_item",
     description: "Read one context item's text from the latest or previous local request. Bounded to 32k characters, read-only.",
     inputSchema: { type: "object", properties: { session_id: { type: "string" }, item_id: { type: "string" }, prev: { type: "boolean" } }, required: ["session_id", "item_id"], additionalProperties: false },
@@ -1217,6 +1581,10 @@ async function handleToolCall(name, args) {
   }
   if (name === "get_activity") {
     try { return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: fetchActivity(args) }) }] }; }
+    catch (e) { return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }], isError: true }; }
+  }
+  if (name === "get_day_sessions") {
+    try { return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: fetchDaySessions(args?.day) }) }] }; }
     catch (e) { return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }], isError: true }; }
   }
   if (name === "get_context_item") {
@@ -1392,3 +1760,9 @@ async function dispatch(line) {
     send({ jsonrpc: "2.0", id, error: { code: -32603, message: e.message } });
   }
 }
+
+/* ---------- 测试与基准辅助导出（不影响 MCP stdio 协议） ---------- */
+export const __internals = {
+  readIoEntries, readLatestIoEntry, readTailIoEntries,
+  fetchInsights, fetchFleet, ensureActivityBuckets, activityTop, activityPickSessions, q, openDb,
+};

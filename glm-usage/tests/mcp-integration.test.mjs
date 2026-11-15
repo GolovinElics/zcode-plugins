@@ -17,7 +17,7 @@ test('real MCP transport: recent 600 steps, all-time totals, family, browser and
     CREATE TABLE turn_usage(session_id TEXT, started_at INTEGER, cancelled_by_user INTEGER, context_exceeded INTEGER, status TEXT, error_type TEXT);
     CREATE TABLE part(id TEXT, session_id TEXT, message_id TEXT, sequence INTEGER, time_created INTEGER, data TEXT);
     CREATE TABLE message(id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
-    CREATE TABLE todo(session_id TEXT, status TEXT);
+    CREATE TABLE todo(session_id TEXT, content TEXT, status TEXT, priority TEXT, position INTEGER, time_created INTEGER, time_updated INTEGER);
   `);
   const now = Date.now();
   const insertSession = db.prepare('INSERT INTO session VALUES(?,?,?,?,?,?,?,?,?,?)');
@@ -33,6 +33,12 @@ test('real MCP transport: recent 600 steps, all-time totals, family, browser and
   }
   const io = { request: { body: { model: 'glm-5', messages: [{ role: 'user', content: 'Test context' }] } }, response: { usage: { prompt_tokens: 100, completion_tokens: 10 } }, completedAt: new Date(now).toISOString() };
   writeFileSync(join(root, 'cli/rollout/model-io-sess_root.jsonl'), JSON.stringify(io) + '\n');
+  const insertTodo = db.prepare('INSERT INTO todo VALUES(?,?,?,?,?,?,?)');
+  insertTodo.run('sess_root', '实现费用轴', 'in_progress', 'high', 0, now - 5000, now - 1000);
+  insertTodo.run('sess_root', '补充测试', 'completed', 'medium', 1, now - 8000, now - 2000);
+  insertTodo.run('sess_child', '验收清单', 'pending', 'low', 0, now - 4000, now - 3000);
+  insertSession.run('sess_subagent_agent_12345678-1234-5678-9abc-def012345678', '你在 zcode-plugins 仓库实现功能', '/workspace/a', 'sess_child', null, now - 6000, now - 1000, null, null, null);
+  db.prepare('INSERT INTO part VALUES(?,?,?,?,?,?)').run('p_agent1', 'sess_child', 'm2', 0, now - 6000, JSON.stringify({ type: 'tool', callID: 'call_agent1', tool: 'Agent', state: { status: 'completed', input: { description: '实现功能', prompt: '你在 zcode-plugins 仓库实现功能' }, output: 'Async agent launched successfully.\nagentId: agent_12345678-1234-5678-9abc-def012345678 (internal ID)' } }));
   db.close();
   const client = mcpClient({ GLM_ZCODE_DIR: root, GLM_USAGE_DATA_DIR: join(root, 'config') });
   try {
@@ -43,7 +49,17 @@ test('real MCP transport: recent 600 steps, all-time totals, family, browser and
     assert.equal(context.session.token_sums.input, 605 * 100 + 604 * 605 / 2);
     assert.equal(context.stats.commands.length, 12); assert.equal(context.stats.command_calls, 14);
     const fleet = await client.call('get_fleet', { session_id: 'sess_child' });
-    assert.equal(fleet.lead.id, 'sess_root'); assert.equal(fleet.summary.running, 2); assert.equal(fleet.lead.context, 704);
+    assert.equal(fleet.lead.id, 'sess_root'); assert.equal(fleet.summary.running, 3); assert.equal(fleet.lead.context, 704);
+    assert.equal(fleet.members.length, 2);
+    assert.equal(fleet.summary.agents, 3);
+    assert.equal(fleet.comms.length, 1);
+    assert.equal(fleet.comms[0].from, 'sess_child');
+    assert.equal(fleet.comms[0].to, 'sess_subagent_agent_12345678-1234-5678-9abc-def012345678');
+    assert.equal(fleet.comms[0].kind, 'delegate'); assert.equal(fleet.comms[0].description, '实现功能');
+    assert.equal(fleet.works.length, 3);
+    assert.equal(fleet.works.filter(w => w.status === 'in_progress').length, 1);
+    assert.equal(fleet.works.filter(w => w.status === 'pending').length, 1);
+    assert.equal(fleet.works.filter(w => w.status === 'completed').length, 1);
     const browser = await client.call('get_context_browser', { session_id: 'sess_root' });
     assert.equal(browser.total, 100); assert.equal(browser.has_previous, false);
     await assert.rejects(client.call('get_context_browser', { session_id: 'sess_root', prev: true }), /上一条/);
@@ -56,7 +72,14 @@ test('real MCP transport: recent 600 steps, all-time totals, family, browser and
     assert.equal(activity.rows.length, 14); assert.equal(activity.rows[0].program, 'node'); assert(activity.rows[0].background);
     const insights = await client.call('get_insights', { range: '7d' });
     assert.equal(insights.kpis.steps, 605); assert.equal(insights.sessions[0].context, 704);
-    assert(insights.daily[0].session_ids.includes('sess_root'));
+    assert.equal(!('session_ids' in insights.daily[0]), true);
+    assert.equal(!('session_ids' in insights.heatmap[0]), true);
+    assert.equal(insights.daily7.at(-1).day, insights.daily.at(-1).day);
+    assert.equal(insights.daily7.length, insights.daily.length);
+    const daySessions = await client.call('get_day_sessions', { day: new Date(now).toLocaleDateString('en-CA') });
+    assert(daySessions.session_ids.includes('sess_root'));
+    assert.deepEqual(await client.call('get_day_sessions', { day: '2000-01-01' }), { day: '2000-01-01', session_ids: [] });
+    await assert.rejects(client.call('get_day_sessions', { day: 'not-a-day' }), /YYYY-MM-DD/);
     const resource = await client.request('resources/read', { uri: 'ui://glm-usage/panel.html' });
     assert(!resource.contents[0].text.includes('@inline:'));
   } finally { client.close(); rmSync(root, { recursive: true, force: true }); }
