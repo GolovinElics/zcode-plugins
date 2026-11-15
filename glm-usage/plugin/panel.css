@@ -70,8 +70,8 @@
   .metric { background:color-mix(in srgb,var(--bg2) 55%,transparent); border:1px solid color-mix(in srgb,var(--bd) 70%,transparent); border-radius:var(--radius-inner); padding:8px 12px; }
   .metric .mv { font:650 15px var(--mono); font-variant-numeric:tabular-nums; }
   .metric .mk { font-size:10.5px; color:var(--dim); margin-top:1px; }
-  .bars { display:flex; align-items:flex-end; gap:1px; height:88px; padding:2px 0; }
-  .bars > div { flex:1; min-width:1px; border-radius:1px 1px 0 0; background:var(--acc); opacity:.75; }
+  .bars { display:flex; align-items:flex-end; gap:4px; height:88px; padding:2px 0; }
+  .bars > div { flex:1; min-width:2px; border-radius:3px 3px 0 0; background:var(--acc); }
   .bars > div.peak { background:var(--mid); }
   .barAxis { display:flex; justify-content:space-between; font-size:9.5px; color:var(--faint); margin-top:4px; font-family:var(--mono); }
   .legend { display:flex; gap:12px; font-size:10.5px; color:var(--dim); margin-top:6px; }
@@ -162,8 +162,8 @@
   .metric { background:color-mix(in srgb,var(--bg2) 55%,transparent); border:1px solid color-mix(in srgb,var(--bd) 70%,transparent); border-radius:var(--radius-inner); padding:8px 12px; }
   .metric .mv { font:650 15px var(--mono); font-variant-numeric:tabular-nums; }
   .metric .mk { font-size:10.5px; color:var(--dim); margin-top:1px; }
-  .bars { display:flex; align-items:flex-end; gap:1px; height:88px; padding:2px 0; }
-  .bars > div { flex:1; min-width:1px; border-radius:1px 1px 0 0; background:var(--acc); opacity:.75; }
+  .bars { display:flex; align-items:flex-end; gap:4px; height:88px; padding:2px 0; }
+  .bars > div { flex:1; min-width:2px; border-radius:3px 3px 0 0; background:var(--acc); }
   .bars > div.peak { background:var(--mid); }
   .barAxis { display:flex; justify-content:space-between; font-size:9.5px; color:var(--faint); margin-top:4px; font-family:var(--mono); }
   .legend { display:flex; gap:12px; font-size:10.5px; color:var(--dim); margin-top:6px; }
@@ -761,7 +761,10 @@ dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self
 .usageDetails .metric { padding:8px; min-width:0; border-radius:7px; }
 .usageDetails .metric .mv { font-size:14px; line-height:1.4; white-space:nowrap; }
 .usageDetails .metric .mk { font-size:10px; }
-.usageDetails .bars { height:100px; }
+.usageDetails .bars { height:104px; padding:4px 2px 0; }
+/* 使用详情柱与洞察日图同风格：外端圆角 + 实色 + 悬浮提亮（growY 入场沿用） */
+.bars > div { transition:filter .15s ease; }
+.bars > div:hover { filter:brightness(1.18); }
 .usageDetails .items { gap:7px; margin-top:10px; }
 .usageDetails .item .in { width:100px; font-size:10.5px; }
 .usageDetails .item .iv { width:75px; font-size:10.5px; }
@@ -781,8 +784,29 @@ dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self
 .healthXAxis .first { transform:none; }.healthXAxis .last { transform:translateX(-100%); }
 .healthHits { position:absolute; inset:0; }
 .healthPoint { position:absolute; height:100%; top:0; padding:0; border:0; border-radius:0; background:transparent; }
-.healthPoint:hover, .healthPoint:focus-visible { background:color-mix(in srgb,var(--acc) 6%,transparent); }
+/* 十字游标（interactions.js highlightHealth）：垂线贴数据点、顶端止于最高交点，替代旧矩形带高亮 */
+.healthCross { position:absolute; inset:0; pointer-events:none; }
+.hxLine { position:absolute; width:0; border-left:1px dashed color-mix(in srgb,var(--fg) 34%,transparent); }
+.hxDate { position:absolute; transform:translateX(-50%); color:var(--dim); font:9.5px/1 var(--mono); background:var(--card); border:1px solid var(--bd); border-radius:4px; padding:2px 5px; white-space:nowrap; }
+.hxDot { position:absolute; width:7px; height:7px; border-radius:50%; transform:translate(-50%,-50%); border:1.5px solid var(--card); box-shadow:0 0 0 1px color-mix(in srgb,var(--bd) 55%,transparent); }
+.hxVal { position:absolute; transform:translateY(-50%); font:650 10px/1.3 var(--mono); font-variant-numeric:tabular-nums; background:color-mix(in srgb,var(--card) 88%,transparent); border-radius:4px; padding:1px 4px; white-space:nowrap; }
+.hxVal.left { transform:translate(-100%,-50%); }
 .healthFoot { color:var(--dim); font-size:10px; margin-top:8px; }
+.healthSummary { grid-template-columns:repeat(3,minmax(0,1fr)); }
+/* 实际速率基线填充入场（描线动画期间淡入，reduced-motion 由全局关闭兜底） */
+.hSpeed .areaFill { animation:areaIn .9s var(--ease) both; }
+@keyframes areaIn { from { opacity:0; } }
+/* ---------- 光带骨架占位：加载区块先铺与最终结构同几何的底板，数据到位原位替换，页面不跳版。
+   光带与 .sk 同款（斜向 accent 高光 + 有限次后静止），两套骨架视觉统一 ---------- */
+.skel { position:relative; display:inline-block; overflow:hidden; border-radius:4px; background:color-mix(in srgb,var(--fg) 6%,transparent); }
+.skel::before { content:""; position:absolute; top:-8%; bottom:-8%; left:0; width:46%;
+  transform:translateX(-130%) skewX(-12deg);
+  background:linear-gradient(100deg,transparent,color-mix(in srgb,var(--fg) 8%,transparent) 40%,color-mix(in srgb,var(--acc) 32%,transparent) 50%,color-mix(in srgb,var(--fg) 8%,transparent) 60%,transparent);
+  animation:skSweep 1.8s var(--ease) infinite; animation-iteration-count:14; animation-delay:var(--sk-d,0s); }
+/* 骨架条覆盖 .bars/.ib 的正式配色与生长动画（光带仍在 ::before 上扫动） */
+.bars > div.skel, .item .ib > i.skel { background:color-mix(in srgb,var(--fg) 6%,transparent); opacity:1; animation:none; }
+.item .ib > i.skel { display:block; }
+.skelBlock { display:block; }
 @media(max-width:900px) { .usageDetails { grid-template-columns:minmax(0,1fr); } }
 @media(max-width:460px) { .usageDetails .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 
@@ -886,7 +910,8 @@ dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self
 .densePage .dailyAxis { font-size:9.5px; }
 .densePage .dailyChart .col .tv, .densePage .dailyChart .col .lb { font-size:9.5px; }
 .densePage .chartLegend { margin-top:5px; gap:4px 10px; }
-.densePage :is(.ovMid,.ctxTop) > .card { min-height:0; }
+.densePage .ovMid > .card { min-height:168px; } /* 环形图卡骨架期与数据期同高，避免换行跳动 */
+.densePage .ctxTop > .card { min-height:0; }
 .densePage .donutWrap { gap:10px; }
 .densePage .donutWrap .lc-donut { transform:none; margin:0; }
 .densePage .legendGrid { gap:4px 10px; grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -960,3 +985,53 @@ dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self
 /* 排行卡标题图标（对齐 dsh TallyCard icon：单色描边、与标题行内居中） */
 .lc-title .t { display:inline-flex; align-items:center; gap:5px; }
 .lc-title .ticon { width:13px; height:13px; flex:none; display:block; opacity:.85; }
+
+/* ===== 光带骨架屏：加载期间按最终布局占位（复用真实内容的 class 与网格，骨架与内容同构），
+   数据到位后 patchElement 原位替换——区块尺寸/位置不变，首载不重排、不闪烁 ===== */
+.sk { position:relative; display:block; overflow:hidden; border-radius:5px; background:color-mix(in srgb,var(--fg) 7%,transparent); }
+.sk::after { content:""; position:absolute; top:-8%; bottom:-8%; left:0; width:46%;
+  transform:translateX(-130%) skewX(-12deg);
+  background:linear-gradient(100deg,transparent,color-mix(in srgb,var(--fg) 8%,transparent) 40%,color-mix(in srgb,var(--acc) 32%,transparent) 50%,color-mix(in srgb,var(--fg) 8%,transparent) 60%,transparent);
+  animation:skSweep 1.8s var(--ease) infinite; animation-iteration-count:14; animation-delay:var(--sk-d,0s); }
+@keyframes skSweep { 55%,100% { transform:translateX(330%) skewX(-12deg); } }
+.skCircle { border-radius:50%; }
+.skFlat { display:block; background:color-mix(in srgb,var(--fg) 9%,transparent); }
+.bars > .skFlat { flex:1; min-width:1px; border-radius:1px 1px 0 0; }
+.item .ib > .skFlat { border-radius:99px; }
+/* 网格类区域（热力图周列）：静态格 + 每列一条竖向扫过的光带，整列波次推进 */
+.skCol { position:relative; overflow:hidden; }
+.skCol::after { content:""; position:absolute; inset:-8% -30%; transform:translateX(-130%) skewX(-12deg);
+  background:linear-gradient(100deg,transparent,color-mix(in srgb,var(--acc) 18%,transparent) 50%,transparent);
+  animation:skSweep 2s var(--ease) infinite; animation-iteration-count:14; animation-delay:var(--sk-d,0s); }
+/* meter 内的骨架填充沿用轨道圆角 */
+.meter > i.sk { border-radius:var(--radius-full); }
+@media (prefers-reduced-motion:reduce) { .sk::after, .skCol::after { animation:none !important; } }
+
+/* ===== 模型价格管理弹窗（洞察·预估费用入口）===== */
+.pricingDialog { width:min(860px,calc(100vw - 32px)); }
+.priceToolbar { display:flex; align-items:center; gap:7px; flex-wrap:wrap; padding:8px 0 10px; border-bottom:1px solid var(--bd); }
+.priceToolbar input { padding:4px 6px; font:12px var(--mono); }
+.priceModels { display:flex; flex-direction:column; }
+.priceRow { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1.6fr) auto; gap:6px 14px; align-items:center; padding:10px 6px; border-bottom:1px solid var(--bd); }
+.priceRow:hover { background:var(--card2); }
+.priceRow > .priceAlt, .priceRow > .priceEdit { grid-column:1 / -1; }
+.prMain { min-width:0; }
+.prName { font-size:12.5px; font-weight:650; font-family:var(--mono); overflow-wrap:anywhere; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.prUse { font-size:10.5px; margin-top:2px; }
+.prCur b { font-size:12.5px; font-variant-numeric:tabular-nums; }
+.prCur .muted, .prRec .muted { display:block; font-size:10px; margin-top:2px; }
+.prRec { display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+.priceChip { font:600 11px var(--mono); font-variant-numeric:tabular-nums; padding:2px 8px; border-radius:6px; border:1px solid color-mix(in srgb,var(--acc) 40%,transparent); background:color-mix(in srgb,var(--acc) 10%,transparent); color:var(--fg); cursor:default; }
+.priceOps { display:flex; gap:2px; }
+.priceAlt { padding:4px 2px 8px; }
+.priceAltRow { display:flex; align-items:center; gap:8px; padding:3px 4px; border-radius:6px; flex-wrap:wrap; }
+.priceAltRow:hover { background:var(--card2); }
+.priceAltRow .muted { flex:1; min-width:0; font-size:10.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.priceEdit { display:flex; align-items:center; gap:6px; flex-wrap:wrap; padding:6px 2px 2px; }
+.priceEdit input { width:110px; padding:4px 8px; font:12px var(--mono); }
+.priceSearchRow { margin-top:12px; }
+.priceSearchRow input { width:100%; }
+#priceSearchOut { margin-top:2px; }
+.priceAdd { display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
+.priceAdd input { flex:1 1 150px; min-width:100px; font:12px var(--mono); padding:5px 8px; }
+@media (max-width:700px) { .priceRow { grid-template-columns:minmax(0,1fr) auto; } .prCur { grid-column:1; } .prRec { grid-column:1 / -1; } }

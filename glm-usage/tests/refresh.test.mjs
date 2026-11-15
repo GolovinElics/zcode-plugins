@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 function runtime() {
   const nodes=new Map(), timers=[];
-  const node=()=>({style:{},dataset:{},value:'',textContent:'',addEventListener(){},setAttribute(){},getAttribute(){return 'dark';},classList:{add(){},remove(){},toggle(){}}});
+  const node=()=>({style:{},dataset:{},value:'',textContent:'',innerHTML:'',querySelector:()=>null,addEventListener(){},setAttribute(){},getAttribute(){return 'dark';},classList:{add(){},remove(){},toggle(){}}});
   const document={hidden:false,documentElement:node(),getElementById:id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);},querySelectorAll:()=>[]};
   const r=vm.createContext({document,window:{addEventListener(){}},setInterval:fn=>{timers.push(fn);return timers.length;},clearInterval(){},setBusy(){},console});
   vm.runInContext(readFileSync(new URL('../plugin/app.js',import.meta.url),'utf8'),r);

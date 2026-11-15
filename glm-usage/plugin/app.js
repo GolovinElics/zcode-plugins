@@ -51,6 +51,163 @@ function agoTs(ts){
   return new Date(ts).toLocaleDateString("zh-CN");
 }
 
+/* ---- 光带骨架屏（SK）：与各区块最终布局同构的加载占位。骨架复用真实内容的 class/网格，
+   加载期与数据期同尺寸；数据到位由 patchElement 原位替换（首载不重排、不闪烁）。
+   光带为纯 transform 动画且有限次（~25s 后静止，失败态不无限闪）；行内 --sk-d 做波次错峰 ---- */
+var SK = (function () {
+  function b(w, h, i, x) {
+    return '<i class="sk' + (x ? " " + x : "") + '" style="width:' + w + ";height:" + h
+      + ";--sk-d:" + ((i || 0) * 0.09).toFixed(2) + 's"></i>';
+  }
+  function quota(i, full) { /* 套餐配额区：head + meter + 用量行（full 含速率行与走势） */
+    return '<div class="quotaSection">'
+      + '<div class="quotaHead">' + b("36%", "13px", i) + b("24%", "13px", i) + "</div>"
+      + '<div class="meter"><i class="sk" style="width:46%;height:100%;--sk-d:' + ((i + 1) * 0.09).toFixed(2) + 's"></i></div>'
+      + '<div class="qLine">' + b("64%", "10px", i + 2) + "</div>"
+      + (full ? '<div class="qLine">' + b("46%", "10px", i + 3) + "</div>" + '<div class="sparkBox spark">' + b("100%", "38px", i + 4) + "</div>" : "")
+      + "</div>";
+  }
+  var R = {
+    hero: function () {
+      return '<section class="card hero"><div class="heroHead">' + b("170px", "26px", 0) + b("58px", "20px", 1) + b("150px", "14px", 2) + "</div>"
+        + '<div class="quotaWrap" id="heroWrap">' + quota(1, true) + quota(5, true) + "</div></section>";
+    },
+    plans: function () {
+      function card(i) {
+        return '<section class="card plan"><h3>' + b("40%", "14px", i) + b("52px", "16px", i) + "</h3>"
+          + '<div class="life">' + b("56%", "11px", i) + "</div>"
+          + '<div class="pwrap">' + quota(i, false) + "</div></section>";
+      }
+      return card(0) + card(3);
+    },
+    kpis: function () {
+      return [0, 1, 2, 3, 4, 5].map(function (i) {
+        return '<div class="kpi">' + b("38%", "11px", i) + b("56%", "22px", i) + b("76%", "12px", i) + "</div>";
+      }).join("");
+    },
+    daily: function () { /* 与真实日图同构：左右轴 + 7 组幽灵柱（Token 三段 + 费用柱） */
+      var hs = [42, 58, 36, 66, 50, 78, 60];
+      return '<div class="dailyAxis">' + [0, 1, 2, 3, 4].map(function (i) { return b("30px", "9px", i); }).join("") + "</div>"
+        + '<div class="dailyPlot">' + hs.map(function (h, i) {
+          return '<span class="col"><span class="pair"><span class="bar"><i class="skFlat" style="height:' + h + '%"></i></span><span class="bar cost"><i class="skFlat" style="height:' + Math.round(h * .5) + '%"></i></span></span></span>';
+        }).join("") + "</div>"
+        + '<div class="dailyAxis costAxis">' + [0, 1, 2, 3, 4].map(function (i) { return b("34px", "9px", i); }).join("") + "</div>";
+    },
+    donut: function (n) {
+      var rows = "";
+      for (var i = 0; i < n; i++) rows += '<span class="lgRow">' + b("8px", "8px", i) + b("34%", "10px", i) + b("38px", "10px", i) + b("44px", "10px", i) + "</span>";
+      return '<div class="donutWrap"><i class="sk skCircle" style="width:118px;height:118px"></i><div class="legendGrid">' + rows + "</div></div>";
+    },
+    barList: function (n) {
+      var rows = "";
+      for (var i = 0; i < n; i++) rows += '<span class="barRow">' + b("7px", "7px", i) + b(30 + (i * 13) % 42 + "%", "10px", i) + b("26px", "10px", i) + "</span>";
+      return rows;
+    },
+    heat: function () { /* 周列同构：静态格 + 每列一条光带 */
+      var wds = ""; for (var i = 0; i < 7; i++) wds += '<span class="hwd"></span>';
+      var cols = "";
+      for (var c = 0; c < 8; c++) {
+        var cells = ""; for (var r = 0; r < 7; r++) cells += '<span class="hcell"></span>';
+        cols += '<div class="hcol skCol" style="--sk-d:' + (c * 0.12).toFixed(2) + 's">' + cells + "</div>";
+      }
+      return '<div class="hwds">' + wds + '</div><div class="hcols">' + cols + "</div>";
+    },
+    sessions: function () {
+      function card(i) {
+        return '<div class="sCard" style="min-height:170px">'
+          + '<div class="sHead">' + b("58%", "14px", i) + b("64px", "22px", i) + "</div>"
+          + '<div class="sCrumb">' + b("76px", "17px", i + 1) + b("52px", "17px", i + 1) + "</div>"
+          + '<div class="sBody"><i class="sk skCircle" style="width:76px;height:76px;flex:none"></i><div class="sStats">' + b("86%", "11px", i + 2) + b("70%", "11px", i + 2) + b("78%", "11px", i + 2) + "</div></div>"
+          + '<div class="sPreview">' + b("44px", "10px", i + 3) + b("64%", "10px", i + 3) + "</div></div>";
+      }
+      return [0, 1, 2, 3, 4, 5].map(card).join("");
+    },
+    groups: function () {
+      var out = ""; for (var i = 0; i < 3; i++) out += '<span class="gchip">' + b("48px", "10px", i) + "</span>";
+      return out;
+    },
+    ctxStats: function () {
+      var cells = ""; for (var i = 0; i < 4; i++) cells += '<div class="csCell">' + b("60%", "17px", i) + b("44%", "10px", i) + "</div>";
+      var rows = ""; for (var j = 0; j < 4; j++) rows += '<div><div class="csRow">' + b("34%", "12px", j + 5) + b("40px", "12px", j + 5) + '</div><div class="chipRow">' + b("76px", "14px", j + 5) + b("60px", "14px", j + 6) + b("88px", "14px", j + 6) + "</div></div>";
+      return '<div class="csKpis">' + cells + '</div><div class="csEvents">' + b("72%", "11px", 4) + '</div><div class="csRows">' + rows + "</div>";
+    },
+    ctxInfo: function () {
+      var rows = ""; for (var i = 0; i < 8; i++) rows += '<div class="row">' + b("52px", "11px", i) + b("46%", "11px", i) + "</div>";
+      return rows;
+    },
+    trend: function () { return '<i class="sk" style="height:230px"></i><div class="trendHint">' + b("30%", "10px", 2) + "</div>"; },
+    events: function () {
+      var rows = ""; for (var i = 0; i < 5; i++) rows += '<span class="evRow">' + b("14px", "14px", i) + b("44px", "14px", i) + b("52%", "11px", i) + b("40px", "10px", i) + "</span>";
+      return rows;
+    },
+    browser: function () {
+      function cat(i) {
+        return '<section class="brCat"><div class="brCatHead">' + b("12px", "12px", i) + b("10px", "10px", i) + b("34%", "12px", i) + b("48px", "10px", i) + b("34px", "10px", i) + "</div></section>";
+      }
+      return '<div class="brCats">' + cat(0) + cat(1) + cat(2) + cat(3) + "</div>";
+    },
+    fleetStats: function () {
+      var out = ""; for (var i = 0; i < 4; i++) out += '<div class="st">' + b("56%", "18px", i) + b("64%", "10px", i) + "</div>";
+      return out;
+    },
+    fleetTree: function () {
+      function card(i) {
+        return '<div class="agentCard"><div class="ah">' + b("8px", "8px", i) + b("52%", "12px", i) + b("46px", "16px", i) + "</div>"
+          + '<div class="am">' + b("64%", "10px", i + 1) + "</div>"
+          + '<div class="agentValue">' + b("70%", "24px", i + 1) + "</div>"
+          + '<div class="abar"><i class="skFlat" style="height:100%;width:52%"></i></div>'
+          + '<div class="af">' + b("44%", "10px", i + 2) + b("44%", "10px", i + 2) + "</div></div>";
+      }
+      return '<div class="treeBranch treeRoot">' + card(0) + '<div class="treeKids"><div class="treeBranch">' + card(2) + '</div><div class="treeBranch">' + card(4) + "</div></div></div>";
+    },
+    members: function () {
+      var rows = "";
+      for (var i = 0; i < 4; i++) rows += '<span class="fleetRow"><i class="sk skCircle" style="width:30px;height:30px;flex:none"></i>'
+        + '<span class="fleetInfo">' + b("46%", "13px", i) + b("66%", "10px", i) + "</span>"
+        + '<span class="fleetCtx">' + b("100%", "10px", i) + '<span class="bar"><i class="skFlat" style="height:100%;width:40%"></i></span></span></span>';
+      return rows;
+    },
+    comms: function () {
+      var rows = "";
+      for (var i = 0; i < 3; i++) rows += '<span class="commsRow">' + b("40px", "16px", i) + '<span class="cBody">' + b("82%", "12px", i) + b("58%", "10px", i) + "</span>" + b("7px", "7px", i, "skCircle") + "</span>";
+      return rows;
+    },
+    inspector: function () {
+      var cells = ""; for (var i = 0; i < 4; i++) cells += "<span>" + b("56%", "10px", i + 2) + b("64%", "12px", i + 2) + "</span>";
+      return '<div class="agentInspectorHead"><div>' + b("44px", "10px", 0) + b("58%", "13px", 0) + "</div>" + b("86px", "12px", 1) + "</div>"
+        + '<div class="stepMetrics">' + cells + "</div>"
+        + '<div class="stepNote">' + b("76%", "10px", 6) + "</div>";
+    }
+  };
+  var MAP = { /* detailBody/healthBody 不在此列：由 ensureDetailSkeleton/ensureHealthSkeleton 负责（同结构骨架+原位补值，含真实标签） */
+    hero: R.hero, plans: R.plans,
+    insKpis: R.kpis, insDailyChart: R.daily,
+    insTokensBody: function () { return R.donut(5); }, ctxTokensBody: function () { return R.donut(5); },
+    insTimingBody: function () { return R.donut(3); }, ctxTimingBody: function () { return R.donut(3); },
+    insHeatGrid: R.heat, insSkillsList: function () { return R.barList(6); }, insToolsList: function () { return R.barList(6); }, insCmdsList: function () { return R.barList(6); },
+    insSessions: R.sessions, sessGroups: R.groups,
+    ctxStats: R.ctxStats, ctxInfo: R.ctxInfo, ctxTrend: R.trend, trendLegend: function () { return b("46%", "10px", 0); },
+    ctxEvents: R.events, ctxBrowser: R.browser,
+    fleetStats: R.fleetStats, fleetNodes: R.fleetTree, fleetMembers: R.members,
+    fleetComms: R.comms, fleetWork: R.comms, agentInspector: R.inspector
+  };
+  return {
+    region: function (id) { return MAP[id] ? MAP[id]() : null; },
+    /* 启动即挂载：各标签页首次进入数据未到时直接呈现同构骨架（不等待 bridge-ready） */
+    mountAll: function () {
+      Object.keys(MAP).forEach(function (id) {
+        var el = document.getElementById(id), html = SK.region(id);
+        if (el && html) { el.innerHTML = html; el.dataset.sk = "1"; }
+      });
+      var strip = document.getElementById("browserStrip");
+      if (strip) strip.innerHTML = '<i class="sk" style="flex:1;height:100%"></i>';
+      /* 使用详情/健康度：铺 ensure*Skeleton 的同结构骨架（真实标签 + 占位值，数据到达原位补值） */
+      var db = document.getElementById("detailBody"); if (db) ensureDetailSkeleton(db);
+      var hb = document.getElementById("healthBody"); if (hb) ensureHealthSkeleton(hb);
+    }
+  };
+})();
+
 /* ---- dsh 同构环形图：42 viewBox / r15.9155 / stroke4 / 字号随尺寸缩放 / 中心省略 ---- */
 var SEG_GAP = 0.5;
 function monotonePath(xy) {
@@ -196,6 +353,7 @@ async function load() {
           + '<span class="heroStatus">付费编程套餐 · bigmodel.cn</span></div>'
           + '<div class="quotaWrap" id="heroWrap"></div></section>';
         built.hero = true;
+        animateSwap(hero); /* 骨架→内容首次落位轻柔沉降 */
       }
       document.getElementById("cpLevel").textContent = esc(cp.level).toUpperCase();
       var wrap = document.getElementById("heroWrap");
@@ -285,6 +443,8 @@ function patchElement(el, html) {
   template.innerHTML = svg ? '<svg>' + html + '</svg>' : html;
   morphChildren(el, svg ? template.content.firstElementChild : template.content);
   if (window.restoreHover) restoreHover(el);
+  /* 骨架首载落位：真实内容替换骨架时轻柔沉降一下（仅一次，实时刷新不受影响） */
+  if (el.dataset && el.dataset.sk) { delete el.dataset.sk; animateSwap(el); }
   return true;
 }
 
@@ -448,7 +608,7 @@ function renderInsights() {
     { l: "Token 消耗", v: cnum(k.tokens), s: "轮次 " + k.turns, dim: false },
     k.cost != null
       ? { l: "预估费用", v: "¥" + (Math.round(k.cost * 100) / 100), s: "已计价 · 按 prices 配置", dim: false }
-      : { l: "预估费用", v: "—", s: "配置 prices 后可用", dim: true },
+      : { l: "预估费用", v: "—", s: "点击配置模型价格（支持同步目录）", dim: true },
     { l: "缓存命中", v: k.cache_hit + "%", s: "含 " + k.sessions + " 个会话", dim: false },
     { l: "工具调用", v: k.tool_calls, s: "工具执行 " + durMs(k.tool_ms), dim: false },
     { l: "活跃时长", v: durMs(k.active_ms), s: "模型调用 " + k.steps, dim: false },
@@ -701,18 +861,23 @@ async function manualRefresh() {
 applyTheme(document.documentElement.getAttribute("data-theme") || "dark");
 /* ---- 使用详情（官方数据；经 MCP 桥调 get_usage_detail。合并自 glm-usage-dashboard v1.6.3）---- */
 var detailState = { days: 7, tab: "model", data: null }, detailTicket = 0;
+// 光带骨架占位：请求发出前就铺好与最终结构同几何的骨架，数据到达后原位补值，页面不跳版
+function skel(w, h) { return '<span class="skel" style="width:' + w + ';height:' + h + '"></span>'; }
 function ensureDetailSkeleton(body) {
   if (body.dataset.built === "1" && body.querySelector(".metrics, .lineLegend")) return;
+  var barHs = [34, 58, 22, 74, 46, 88, 30, 64, 52, 40, 70, 26];
   body.innerHTML = '<div class="metrics">'
-    + '<div class="metric"><div class="mv" id="dTtl">—</div><div class="mk">总量 token</div></div>'
-    + '<div class="metric"><div class="mv" id="dDly">—</div><div class="mk">日均 token</div></div>'
-    + '<div class="metric"><div class="mv" id="dCh">—</div><div class="mk">缓存命中</div></div>'
-    + '<div class="metric"><div class="mv" id="dPk">—</div><div class="mk">峰时占比</div></div>'
+    + '<div class="metric"><div class="mv" id="dTtl">' + skel("52px", "14px") + '</div><div class="mk">总量 token</div></div>'
+    + '<div class="metric"><div class="mv" id="dDly">' + skel("52px", "14px") + '</div><div class="mk">日均 token</div></div>'
+    + '<div class="metric"><div class="mv" id="dCh">' + skel("52px", "14px") + '</div><div class="mk">缓存命中</div></div>'
+    + '<div class="metric"><div class="mv" id="dPk">' + skel("52px", "14px") + '</div><div class="mk">峰时占比</div></div>'
     + "</div>"
-    + '<div class="bars" id="dBars"></div>'
+    + '<div class="bars" id="dBars">' + barHs.map(function (h) { return '<div class="skel" style="height:' + h + 'px;flex:1"></div>'; }).join("") + '</div>'
     + '<div class="barAxis"><span id="dT0"></span><span id="dT1"></span></div>'
     + '<div class="legend"><span><i style="background:var(--acc)"></i>谷时</span><span><i style="background:var(--mid)"></i>峰时</span><span id="dGran"></span></div>'
-    + '<div class="items" id="dItems"></div>';
+    + '<div class="items" id="dItems">' + [72, 45, 88, 60].map(function (w) {
+      return '<div class="item"><span class="in">' + skel("70%", "10px") + '</span><span class="ib"><i class="skel" style="width:' + w + '%"></i></span><span class="iv">' + skel("80%", "10px") + "</span></div>";
+    }).join("") + '</div>';
   body.dataset.built = "1";
 }
 function renderDetail(animate = false) {
@@ -753,6 +918,7 @@ function renderDetail(animate = false) {
 }
 async function loadDetail(animate = false) {
   var ticket = ++detailTicket, days = detailState.days;
+  ensureDetailSkeleton(document.getElementById("detailBody")); /* 等待网络期间先铺光带骨架，占住最终版式 */
   try {
     var r = await window.__bridgeCall("tools/call", { name: "get_usage_detail", arguments: { days: days } });
     var j = JSON.parse(r.content[0].text);
@@ -778,12 +944,16 @@ document.getElementById("detailTab").addEventListener("click", function (e) {
   renderDetail(true);
 });
 
-/* ---- 系统健康度（官方 model-performance-day；0 基准网格 + 日期轴）---- */
+/* ---- 系统健康度（官方理论速率 model-performance-day + 本地实际解码速率对比）---- */
 var healthState = { days: 7, data: null }, healthTicket = 0;
 function speedChart(d) { return healthChart(d, { escape: esc, curve: monotonePath }); }
 function ensureHealthSkeleton(body) {
   if (body.dataset.built === "1" && body.querySelector('.healthSummary')) return;
-  body.innerHTML = '<div class="healthSummary" id="healthSummary"></div><div class="healthChartCaption">高峰期平均解码速度 <span>tokens/s</span></div><div id="hSpeed"></div><div class="healthFoot" id="healthFoot"></div>';
+  var mSkel = '<div class="metric"><div class="mk">' + skel("58px", "9px") + '</div><div class="mv">' + skel("64px", "14px") + "</div></div>";
+  body.innerHTML = '<div class="healthSummary" id="healthSummary">' + mSkel + mSkel + mSkel + '</div>'
+    + '<div class="healthChartCaption">解码速度 <span>tokens/s</span> · 细线=官方理论 · 填充=本地实际</div>'
+    + '<div id="hSpeed"><div class="skel skelBlock" style="height:148px;border-radius:4px"></div><div class="skel skelBlock" style="height:10px;width:42%;margin:9px auto 0"></div></div>'
+    + '<div class="healthFoot" id="healthFoot">' + skel("46%", "10px") + '</div>';
   body.dataset.built = "1";
 }
 function renderHealth(animate = false) {
@@ -792,13 +962,15 @@ function renderHealth(animate = false) {
   var d = healthState.data;
   ensureHealthSkeleton(body);
   var last = Math.max(0, (d.xTime || []).length - 1);
-  patchHTML('healthSummary', [['Max / Pro', d.proMax?.[last], '#4082f5'], ['Lite', d.lite?.[last], '#ff8e42']].map(function (row) {
+  patchHTML('healthSummary', [['Max / Pro', d.proMax?.[last], '#4082f5'], ['Lite', d.lite?.[last], '#ff8e42'], ['实际 · 本地', d.actual?.[last], '#10b981']].map(function (row) {
     var value = row[1] != null && Number.isFinite(Number(row[1])) ? Number(row[1]).toFixed(1) : '—';
     return '<div class="metric"><div class="mk"><i style="background:' + row[2] + '"></i>' + row[0] + '</div><div class="mv">' + value + ' <small>tok/s</small></div></div>';
   }).join(''));
-  document.getElementById('healthFoot').textContent = '官方每日快照' + (d.xTime?.length ? ' · 最新 ' + d.xTime[last] : '');
+  var nLast = (d.actualN || [])[last];
+  document.getElementById('healthFoot').textContent = (d.official === false ? '官方快照不可用 · 仅本地统计' : '官方每日快照' + (d.xTime?.length ? ' · 最新 ' + d.xTime[last] : ''))
+    + ' · 实际=输出÷解码时长' + (nLast ? '（最新 ' + nLast + ' 次）' : '');
   var speed = document.getElementById("hSpeed");
-  var sigS = d.xTime.join(",") + "|" + d.proMax.join(",") + "|" + d.lite.join(",");
+  var sigS = d.xTime.join(",") + "|" + d.proMax.join(",") + "|" + d.lite.join(",") + "|" + (d.actual || []).join(",");
   if (speed.dataset.sig !== sigS) {
     speed.dataset.sig = sigS;
     patchHTML('hSpeed', speedChart(d));
@@ -813,6 +985,7 @@ function renderHealth(animate = false) {
 }
 async function loadHealth(animate = false) {
   var ticket = ++healthTicket, days = healthState.days;
+  ensureHealthSkeleton(document.getElementById("healthBody")); /* 等待期间先铺光带骨架，占住最终版式 */
   try {
     var r = await window.__bridgeCall("tools/call", { name: "get_health", arguments: { days: days } });
     var j = JSON.parse(r.content[0].text);
@@ -822,7 +995,9 @@ async function loadHealth(animate = false) {
     renderHealth(animate);
   } catch (e) {
     if (ticket !== healthTicket) return;
-    document.getElementById("healthBody").innerHTML = '<div class="err2">获取失败：' + esc(e.message) + "</div>";
+    var body = document.getElementById("healthBody");
+    body.innerHTML = '<div class="err2">获取失败：' + esc(e.message) + "</div>";
+    delete body.dataset.built;
   }
 }
 document.getElementById("healthDays").addEventListener("click", function (e) {
@@ -876,6 +1051,8 @@ function refreshUsage() {
   usageRefresh = Promise.all([load(), loadDetail(), loadHealth()]).finally(() => { usageRefresh = null; });
   return usageRefresh;
 }
+/* 启动即挂载光带骨架：数据未到前各区块按最终布局占位（见 SK 注释） */
+if (typeof document !== "undefined" && document.getElementById) SK.mountAll();
 /* 启动防呆：bridge 迟迟未就绪时兜底显示默认用量页（正常路径在 switchTab 中纠正）；测试沙箱无 setTimeout，跳过 */
 var bootGuard = typeof setTimeout === "function" ? setTimeout(function () {
   var page = document.getElementById("tab-usage");

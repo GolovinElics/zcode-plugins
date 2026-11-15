@@ -22,6 +22,7 @@
 
 import { readViews, writeView } from './view-store.mjs';
 import * as history from './history.mjs';
+import { PRICES_BUILTIN, normalizeLitellm, normalizeOpenRouter, mergeCatalog, recommendFor, normKey } from './pricing.mjs';
 import crypto from "node:crypto";
 import os from "node:os";
 import fs from "node:fs";
@@ -40,7 +41,7 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* 回退 CLI 
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PANEL_URI = "ui://glm-usage/panel.html";
-const VERSION = "2.8.3";
+const VERSION = "2.8.4";
 const APP_VERSION = "3.18.2";
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8791"; // 仅当用户自建网页版时提示用，不作为依赖
 
@@ -53,13 +54,14 @@ const DATA_DIR = process.env.GLM_USAGE_DATA_DIR || path.join(HOME, ".glm-usage")
 const CONFIG_FILE = path.join(DATA_DIR, "config.json");
 const HISTORY_FILE = path.join(DATA_DIR, "history.json");
 const ACTIVITY_CACHE_FILE = path.join(DATA_DIR, "activity-cache.json"); // 命令/技能按天分桶物化
+const PRICING_CACHE_FILE = path.join(DATA_DIR, "pricing-cache.json"); // 模型价格同步目录缓存
 
 // 上下文洞察数据源（只读）
 const ZCODE_DB = path.join(ZCODE_DIR, "cli/db/db.sqlite");
 const ROLLOUT_DIR = path.join(ZCODE_DIR, "cli/rollout");
 
-// 出网白名单：仅这两个公网主机（洞察数据全部本地，不出网）
-const ALLOWED_HOSTS = new Set(["zcode.z.ai", "open.bigmodel.cn"]);
+// 出网白名单：官方两域 + 价格同步两个公开目录源（只拉公开价格 JSON，不携带任何凭据）
+const ALLOWED_HOSTS = new Set(["zcode.z.ai", "open.bigmodel.cn", "raw.githubusercontent.com", "openrouter.ai"]);
 const DEFAULTS = {
   refresh_seconds: 30,
   sample_seconds: 60,
@@ -285,33 +287,85 @@ async function fetchUsageDetail(days = 7) {
   return data;
 }
 
-/* ---------- 官方系统健康度（model-performance-day） ---------- */
+/* ---------- 官方系统健康度（model-performance-day）+ 本地实际解码速率 ---------- */
 
 let healthCache = { at: 0, days: 0, data: null };
+let actualRateMemo = { at: 0, fromMs: 0, map: null };
+
+// 按日聚合本地实际解码速率：输出 tokens ÷ 解码时长（duration−TTFT，与洞察 tps 同口径）。
+// 排除 session_title 后台生成；输出为 0 或时长≤TTFT 的行不计入分子分母，避免拉低/抬高均值。
+function actualRateMap(fromMs) {
+  if (actualRateMemo.map && actualRateMemo.fromMs === fromMs && Date.now() - actualRateMemo.at < 60 * 1000) {
+    return actualRateMemo.map;
+  }
+  const map = new Map();
+  try {
+    const rows = q(`SELECT date(mu.started_at/1000,'unixepoch','localtime') day,
+        SUM(CASE WHEN mu.duration_ms > mu.time_to_first_token_ms AND mu.output_tokens > 0 THEN mu.output_tokens ELSE 0 END) out_t,
+        SUM(CASE WHEN mu.duration_ms > mu.time_to_first_token_ms AND mu.output_tokens > 0 THEN mu.duration_ms - mu.time_to_first_token_ms ELSE 0 END) decode_ms,
+        SUM(CASE WHEN mu.duration_ms > mu.time_to_first_token_ms AND mu.output_tokens > 0 THEN 1 ELSE 0 END) n
+      FROM model_usage mu
+      WHERE mu.started_at >= ? AND mu.query_source != 'session_title'
+      GROUP BY day ORDER BY day`, [fromMs]);
+    for (const r of rows) {
+      const dec = Number(r.decode_ms || 0);
+      map.set(r.day, { rate: dec > 0 ? Number(r.out_t || 0) / (dec / 1000) : null, n: Number(r.n || 0) });
+    }
+  } catch { /* 本地库不可用时仅返回官方理论速率 */ }
+  actualRateMemo = { at: Date.now(), fromMs, map };
+  return map;
+}
+
+// 把按日实际速率对齐到 xTime 轴（同日对位，无本地数据为 null，不跨缺口连线）
+function alignActualSeries(xTime, map) {
+  const actual = [], actualN = [];
+  for (const t of xTime) {
+    const hit = map.get(String(t || "").slice(0, 10));
+    actual.push(hit && hit.rate != null ? Math.round(hit.rate * 10) / 10 : null);
+    actualN.push(hit && hit.rate != null ? hit.n : null);
+  }
+  return { actual, actualN };
+}
+
 async function fetchHealth(days = 7) {
   days = [1, 7, 30].includes(days) ? days : 7;
+  const fromMs = Date.now() - days * 86400 * 1000;
+  const local = actualRateMap(fromMs);
+  let official = null;
   if (healthCache.data && healthCache.days === days && Date.now() - healthCache.at < 5 * 60 * 1000) {
-    return healthCache.data;
+    official = healthCache.data;
+  } else {
+    const apiKey = configuredApiKey();
+    const token = apiKey || loadCodingPlanToken();
+    const url = "https://open.bigmodel.cn/api/monitor/usage/model-performance-day?" +
+      new URLSearchParams({
+        startTime: fmtLocalDayHour(new Date(fromMs)),
+        endTime: fmtLocalDayHour(new Date()),
+      }).toString();
+    try {
+      const json = await httpsGetJson(url, { Authorization: token });
+      if (!json.success) throw new Error(json.msg || `health code=${json.code}`);
+      const d = json.data || {};
+      official = {
+        xTime: d.x_time || [],
+        lite: d.liteDecodeSpeed || [],
+        proMax: d.proMaxDecodeSpeed || [],
+        liteOk: d.liteSuccessRate || [],
+        proMaxOk: d.proMaxSuccessRate || [],
+      };
+      healthCache = { at: Date.now(), days, data: official };
+    } catch (e) {
+      // 官方快照不可用且本地无数据 → 维持原有报错行为；有本地数据则降级为仅实际速率
+      if (!local.size) throw e;
+    }
   }
-  const apiKey = configuredApiKey();
-  const token = apiKey || loadCodingPlanToken();
-  const url = "https://open.bigmodel.cn/api/monitor/usage/model-performance-day?" +
-    new URLSearchParams({
-      startTime: fmtLocalDayHour(new Date(Date.now() - days * 86400 * 1000)),
-      endTime: fmtLocalDayHour(new Date()),
-    }).toString();
-  const json = await httpsGetJson(url, { Authorization: token });
-  if (!json.success) throw new Error(json.msg || `health code=${json.code}`);
-  const d = json.data || {};
-  const data = {
-    xTime: d.x_time || [],
-    lite: d.liteDecodeSpeed || [],
-    proMax: d.proMaxDecodeSpeed || [],
-    liteOk: d.liteSuccessRate || [],
-    proMaxOk: d.proMaxSuccessRate || [],
-  };
-  healthCache = { at: Date.now(), days, data };
-  return data;
+  if (!official) {
+    const localDays = [...local.keys()].sort();
+    const { actual, actualN } = alignActualSeries(localDays, local);
+    return { xTime: localDays, lite: [], proMax: [], liteOk: [], proMaxOk: [], actual, actualN, official: false };
+  }
+  const { actual, actualN } = alignActualSeries(official.xTime, local);
+  return { ...official, actual, actualN, official: true };
 }
 
 /* ---------- 数据整理 ---------- */
@@ -481,6 +535,101 @@ function costOf(modelId, inputT, outputT) {
   const pr = priceFor(modelId);
   if (!pr) return null;
   return Math.round(((Number(inputT || 0) * pr[0] + Number(outputT || 0) * pr[1]) / 1e6) * 10000) / 10000;
+}
+
+/* ---------- 模型价格管理：内置目录 + 多源同步 + 本地模型匹配推荐 ----------
+ * config.prices 保持 [输入, 输出]（¥/百万）现行格式，costOf 不变；
+ * config.price_meta 记录每条价格的来源/时间（source: manual|builtin|litellm|openrouter）；
+ * 同步目录缓存到 pricing-cache.json，只作为推荐参考——改写 prices 必须用户显式应用。 */
+
+const PRICING_SOURCES = {
+  litellm: { url: "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json", label: "LiteLLM 社区目录", normalize: normalizeLitellm },
+  openrouter: { url: "https://openrouter.ai/api/v1/models", label: "OpenRouter 直连/中转", normalize: normalizeOpenRouter },
+};
+function readPricingCache() {
+  try {
+    const c = JSON.parse(fs.readFileSync(PRICING_CACHE_FILE, "utf8"));
+    return c && c.sources && typeof c.sources === "object" ? c : { version: 1, sources: {} };
+  } catch { return { version: 1, sources: {} }; }
+}
+function writePricingCache(cache) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(PRICING_CACHE_FILE, JSON.stringify(cache), { mode: 0o600 });
+  } catch { /* 缓存写失败不阻断：推荐仍可用内置目录 */ }
+}
+async function syncPricing(source) {
+  const src = PRICING_SOURCES[source];
+  if (!src) throw new Error(`未知价格源: ${source}（可选 ${Object.keys(PRICING_SOURCES).join(" / ")}）`);
+  const raw = await httpsGetJson(src.url);
+  const models = src.normalize(raw);
+  if (!models.size) throw new Error(`${src.label} 返回了 0 条可用价格`);
+  const plain = {};
+  for (const [key, rec] of models) plain[key] = rec;
+  const cache = readPricingCache();
+  cache.sources[source] = { at: Date.now(), count: models.size, models: plain };
+  writePricingCache(cache);
+  return { source, label: src.label, count: models.size, at: cache.sources[source].at };
+}
+function buildPricingView(args) {
+  const cfg = loadConfig();
+  const usdCny = Number(cfg.usd_cny) > 0 ? Number(cfg.usd_cny) : 7.2;
+  const cache = readPricingCache();
+  const sources = {};
+  for (const [name, s] of Object.entries(cache.sources)) sources[name] = { count: s.count || 0, at: s.at || 0, label: PRICING_SOURCES[name]?.label || name };
+  const catalog = mergeCatalog({ litellm: cache.sources.litellm?.models || {}, openrouter: cache.sources.openrouter?.models || {} });
+  const localRows = dbAvailable() ? q(`SELECT mu.model_id model, COUNT(*) calls, SUM(mu.input_tokens) in_t, SUM(mu.output_tokens) out_t
+    FROM model_usage mu WHERE mu.model_id IS NOT NULL GROUP BY mu.model_id ORDER BY in_t + out_t DESC LIMIT 40`) : [];
+  const seen = new Set();
+  const localModels = localRows.map((r) => {
+    const norm = normKey(r.model);
+    seen.add(norm);
+    const price = Array.isArray(cfg.prices?.[norm]) ? cfg.prices[norm] : null;
+    return { model: r.model, norm, calls: r.calls, in_t: r.in_t || 0, out_t: r.out_t || 0,
+      price, meta: cfg.price_meta?.[norm] || null, recs: recommendFor(norm, catalog, usdCny) };
+  });
+  // 已配置但本地无调用记录的键也列出（便于查看来源/清理）
+  for (const norm of Object.keys(cfg.prices || {})) {
+    if (norm === "*" || seen.has(norm)) continue;
+    localModels.push({ model: norm, norm, calls: 0, in_t: 0, out_t: 0, price: cfg.prices[norm], meta: cfg.price_meta?.[norm] || null, recs: recommendFor(norm, catalog, usdCny) });
+  }
+  const out = { usd_cny: usdCny, prices: cfg.prices || {}, price_meta: cfg.price_meta || {},
+    local_models: localModels, catalog: { builtin: Object.keys(PRICES_BUILTIN).length, sources } };
+  const query = normKey(args?.query || "");
+  if (query) {
+    out.search = [...catalog.entries()]
+      .filter(([key]) => key.includes(query) || String(key).toLowerCase().split(/[^a-z0-9]+/).some((t) => t.startsWith(query)))
+      .sort((a, b) => (b[1].tier || 0) - (a[1].tier || 0) || a[0].localeCompare(b[0]))
+      .slice(0, 30)
+      .map(([key, rec]) => ({ key, name: rec.name || key, source: rec.source, vendor: rec.vendor || "", tier: rec.tier, cur: rec.cur, in: rec.in, out: rec.out, note: rec.note || "",
+        price_cny: [rec.cur === "USD" ? Math.round(rec.in * usdCny * 1e4) / 1e4 : rec.in, rec.cur === "USD" ? Math.round(rec.out * usdCny * 1e4) / 1e4 : rec.out] }));
+  }
+  return out;
+}
+function setPrices(args) {
+  const cfg = loadConfig();
+  if (args?.usd_cny != null) {
+    const r = Number(args.usd_cny);
+    if (!Number.isFinite(r) || r < 0.5 || r > 50) throw new Error("usd_cny 需在 0.5~50 之间");
+    cfg.usd_cny = r;
+  }
+  let applied = 0, removed = 0;
+  cfg.prices ||= {};
+  cfg.price_meta ||= {};
+  for (const [rawKey, pair] of Object.entries(args?.prices || {})) {
+    const key = normKey(rawKey);
+    if (!key) continue;
+    if (key === "*") { if (pair == null) { delete cfg.prices["*"]; delete cfg.price_meta["*"]; removed++; } continue; }
+    if (pair == null) { delete cfg.prices[key]; delete cfg.price_meta[key]; removed++; continue; }
+    if (!Array.isArray(pair) || pair.length !== 2 || !pair.every((v) => Number.isFinite(Number(v)) && Number(v) >= 0 && Number(v) <= 10000))
+      throw new Error(`价格需为 [输入, 输出]（¥/百万 tokens，0~10000）: ${rawKey}`);
+    cfg.prices[key] = [Number(pair[0]), Number(pair[1])];
+    const meta = args?.meta?.[rawKey] || args?.meta?.[key];
+    cfg.price_meta[key] = meta && typeof meta === "object" ? meta : { source: "manual", at: Date.now() };
+    applied++;
+  }
+  saveConfig(cfg);
+  return { applied, removed, total: Object.keys(cfg.prices).length, usd_cny: cfg.usd_cny || 7.2 };
 }
 
 /* ---------- 时间范围 ---------- */
@@ -1558,6 +1707,28 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
+  {
+    name: "get_pricing",
+    description: "Model pricing view: current config prices, local models with usage and auto-matched recommendations from the catalog (builtin GLM/DeepSeek/GPT/Claude + synced LiteLLM/OpenRouter). Optional query searches the catalog.",
+    inputSchema: { type: "object", properties: { query: { type: "string", description: "Filter catalog entries by model keyword (normalized substring or token prefix)" } }, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+  {
+    name: "sync_pricing",
+    description: "Refresh the reference price catalog from an upstream source (litellm | openrouter). Only updates the local cache (~/.glm-usage/pricing-cache.json); never touches config prices until explicitly applied.",
+    inputSchema: { type: "object", properties: { source: { type: "string", enum: ["litellm", "openrouter"] } }, required: ["source"], additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  },
+  {
+    name: "set_prices",
+    description: "Upsert/remove model prices in config (CNY per 1M tokens, [input, output]). Pass null to remove a key. Optional usd_cny sets the USD→CNY rate used when applying catalog prices.",
+    inputSchema: { type: "object", properties: {
+      prices: { type: "object", description: "{ model_key: [input, output] | null }" },
+      meta: { type: "object", description: "Optional per-key provenance { model_key: { source, at, name? } }" },
+      usd_cny: { type: "number" },
+    }, additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  },
 ];
 
 async function usageText() {
@@ -1703,9 +1874,30 @@ async function handleToolCall(name, args) {
       has_key: !!key, masked: key ? key.slice(0, 5) + "…" + key.slice(-4) : null,
       source: key ? "key" : "browser_session",
       refresh_seconds: cfg.refresh_seconds, sample_seconds: cfg.sample_seconds,
-      context_windows: cfg.context_windows, prices: cfg.prices || {},
+      context_windows: cfg.context_windows, prices: cfg.prices || {}, price_meta: cfg.price_meta || {}, usd_cny: cfg.usd_cny || 7.2,
       insights_available: dbAvailable(),
     }) }] };
+  }
+  if (name === "get_pricing") {
+    try {
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: buildPricingView(args) }) }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }], isError: true };
+    }
+  }
+  if (name === "sync_pricing") {
+    try {
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: await syncPricing(String(args?.source || "")) }) }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }], isError: true };
+    }
+  }
+  if (name === "set_prices") {
+    try {
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, data: setPrices(args) }) }] };
+    } catch (e) {
+      return { content: [{ type: "text", text: JSON.stringify({ ok: false, error: e.message }) }], isError: true };
+    }
   }
   throw new Error(`未知工具: ${name}`);
 }

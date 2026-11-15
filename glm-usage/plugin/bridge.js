@@ -14,7 +14,7 @@
   function sendInit() {
     tries++;
     send({ jsonrpc: "2.0", id: INIT_ID, method: "ui/initialize", params: {
-      appInfo: { name: "glm-usage-panel", title: "GLM 用量 · 上下文洞察", version: "2.8.3" },
+      appInfo: { name: "glm-usage-panel", title: "GLM 用量 · 上下文洞察", version: "2.8.4" },
       appCapabilities: {}, protocolVersion: "2026-01-26" } });
   }
   window.addEventListener("message", function (ev) {

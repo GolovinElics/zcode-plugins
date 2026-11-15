@@ -6,7 +6,8 @@ import { mcpClient } from './mcp-client.mjs';
 
 const live = process.env.GLM_PREVIEW_LIVE === '1';
 const client = live ? mcpClient() : null;
-const readTools = new Set(['get_view_state', 'get_usage_json', 'get_config', 'get_usage', 'get_usage_detail', 'get_health', 'get_insights', 'get_sessions', 'list_sessions', 'get_session_context', 'get_context_browser', 'get_context_item', 'get_fleet', 'get_activity', 'get_day_sessions']);
+const readTools = new Set(['get_view_state', 'get_usage_json', 'get_config', 'get_usage', 'get_usage_detail', 'get_health', 'get_insights', 'get_sessions', 'list_sessions', 'get_session_context', 'get_context_browser', 'get_context_item', 'get_fleet', 'get_activity', 'get_day_sessions', 'get_pricing', 'sync_pricing']);
+const writeTools = new Set(['save_view_state', 'set_prices', 'set_coding_key', 'set_refresh']); // GLM_PREVIEW_PERSIST=1 时才放行（写本机 ~/.glm-usage）
 
 const port = Number(process.env.GLM_PREVIEW_PORT || 8792);
 const origin = `http://127.0.0.1:${port}`;
@@ -30,9 +31,9 @@ http.createServer(async (req, res) => {
     else if (req.method === 'POST' && req.url === '/rpc' && req.headers.origin === origin && req.headers['content-type'] === 'application/json') {
       let body = ''; for await (const chunk of req) { body += chunk; if (body.length > 16384) throw Error('请求过大'); }
       const { name, arguments: args } = JSON.parse(body);
-      if (live && !readTools.has(name) && !(process.env.GLM_PREVIEW_PERSIST === '1' && name === 'save_view_state')) throw Error('真实数据预览只允许读取');
+      if (live && !readTools.has(name) && !(process.env.GLM_PREVIEW_PERSIST === '1' && writeTools.has(name))) throw Error('真实数据预览只允许读取');
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify(live ? await client.request('tools/call', { name, arguments: args || {} }) : fixtureCall(name, args)));
+      res.end(JSON.stringify(live ? await client.request('tools/call', { name, arguments: args || {} }) : await fixtureCall(name, args)));
     } else res.writeHead(404).end();
   } catch (e) { res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: e.message })); }
 }).listen(port, '127.0.0.1', () => console.log(`GLM preview: ${origin}`));

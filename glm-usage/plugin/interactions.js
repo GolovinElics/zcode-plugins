@@ -48,6 +48,7 @@ function restoreHover(root) {
   root.querySelectorAll('.donutWrap').forEach(wrap => highlightDonut(active?.isConnected && wrap.contains(active) ? active : wrap));
   if (root.matches?.('.donutWrap')) highlightDonut(root);
   highlightDay(active?.closest?.('[data-day]')?.dataset.day);
+  if (active?.isConnected && active.closest('.healthPoint')) highlightHealth(Number(active.dataset.healthIndex));
   highlightCategory(state.hoverCat || state.catPick, hoverElement?.closest?.('[data-item]')?.dataset.item);
 }
 function showTip(anchor, label) {
@@ -108,7 +109,9 @@ function selectSession(sid) {
     document.getElementById('browserMeta').textContent = '正在读取请求…';
     document.getElementById('browserSearch').value = state.browserQuery;
     for (const id of ['ctxTokensBody', 'ctxTimingBody', 'ctxBrowser', 'ctxTrend', 'ctxEvents', 'ctxInfo', 'ctxStats']) {
-      patchHTML(id, '<div class="loadingRows" role="status" aria-label="正在读取会话"><i></i><i></i><i></i></div>');
+      /* 会话切换占位：光带骨架与最终布局同构（app.js SK）；独立运行（测试沙箱）时退回普通行占位 */
+      const sk = typeof SK !== 'undefined' && SK.region && SK.region(id);
+      patchHTML(id, sk || '<div class="loadingRows" role="status" aria-label="正在读取会话"><i></i><i></i><i></i></div>');
     }
     for (const id of ['ctxCurBar', 'ctxCurLegend', 'browserStrip', 'ctxIoChips', 'ctxToolChips', 'ctxCmdChips', 'ctxFleetRows']) patchHTML(id, '');
     document.getElementById('ctxCurN').textContent = '—';
@@ -224,6 +227,7 @@ function bootInteractions() {
       const cat = e.target.closest('[data-cat]'); state.hoverCat = cat?.dataset.cat || null;
       highlightCategory(state.hoverCat || state.catPick, cat?.dataset.item);
       highlightDay(e.target.closest('[data-day]')?.dataset.day);
+      const hp = e.target.closest('.healthPoint'); highlightHealth(hp ? Number(hp.dataset.healthIndex) : null);
       const step = e.target.closest('[data-step]'); if (step) hoverTrend(step);
       const agent = e.target.closest('[data-agent]');
       if (agent || state.agentHover) { state.agentHover = agent?.dataset.agent || null; highlightAgent(); renderAgentInspector(); }
@@ -249,14 +253,16 @@ function bootInteractions() {
     if (!next?.closest('[data-tip], [data-slice]')) hideTip();
     const donut = e.target.closest('.donutWrap'); if (donut) highlightDonut(donut.contains(next) ? next : donut);
     highlightDay(next?.closest('[data-day]')?.dataset.day);
+    const hpNext = next?.closest('.healthPoint'); highlightHealth(hpNext ? Number(hpNext.dataset.healthIndex) : null);
     if (e.target.closest('[data-cat]') && !next?.closest('[data-cat]')) { state.hoverCat = null; highlightCategory(); }
   });
   document.addEventListener('focusin', e => {
     const tip = e.target.closest('[data-tip]'); if (tip && lastInput === 'keyboard') showTip(tip); highlightDonut(e.target);
     highlightDay(e.target.closest('[data-day]')?.dataset.day);
+    const hp = e.target.closest('.healthPoint'); if (hp) highlightHealth(Number(hp.dataset.healthIndex));
     const cat = e.target.closest('[data-cat]'); if (cat) { state.hoverCat = cat.dataset.cat; highlightCategory(cat.dataset.cat, cat.dataset.item); }
   });
-  document.addEventListener('focusout', e => { highlightDay(null); hideTip(); const wrap = e.target.closest('.donutWrap'); if (wrap) highlightDonut(wrap); state.hoverCat = null; highlightCategory(); });
+  document.addEventListener('focusout', e => { highlightDay(null); highlightHealth(null); hideTip(); const wrap = e.target.closest('.donutWrap'); if (wrap) highlightDonut(wrap); state.hoverCat = null; highlightCategory(); });
   document.addEventListener('wheel', () => { lastInput = 'pointer'; }, { capture: true, passive: true });
   let scrollFrame = null;
   document.addEventListener('scroll', () => {
@@ -290,7 +296,7 @@ function bootInteractions() {
     const kpi = e.target.closest('[data-kpi]'); if (kpi) {
       const index = Number(kpi.dataset.kpi);
       if (index === 0) { state.group = ''; state.day = null; state.search = ''; state.archive = ''; document.getElementById('sessSearch').value = ''; document.getElementById('sessArchive').value = ''; syncSelect(document.getElementById('sessArchive')); renderSessions(); renderDaily(state.insights); renderHeatmap(state.insights); reveal(document.getElementById('insSessions')); }
-      else if (index === 2) toast('可在本地配置 prices 为不同 GLM 模型设置单价。套餐额度不等同于按量计费。');
+      else if (index === 2) { if (typeof openPricing === 'function') openPricing(); else toast('可在本地配置 prices 为不同 GLM 模型设置单价。套餐额度不等同于按量计费。'); }
       else reveal(document.getElementById(index === 4 ? 'insToolsList' : index === 5 ? 'insTimingBody' : 'insTokensBody'));
     }
   });
@@ -331,10 +337,47 @@ function highlightDay(day) {
   document.querySelectorAll('#tab-insights [data-day]').forEach(el => el.classList.toggle('dayHot', !!day && el.dataset.day === day));
 }
 
+/* 系统健康度十字游标：垂线贴住当日各系列交点、顶端止于最高交点，交点带数值标签（交易图表习惯）。
+   几何与 health-chart.js 同源：x%=i/(n-1)，y=H−v/max·H（H=148，max 由容器 data-max 提供） */
+function highlightHealth(index) {
+  const plot = document.querySelector?.('#healthBody .healthPlot');
+  const cross = plot?.querySelector('.healthCross');
+  if (!cross) return;
+  if (index == null) { cross.hidden = true; return; }
+  const d = typeof healthState !== 'undefined' && healthState.data;
+  const max = Number(plot.closest('.healthChart')?.dataset.max);
+  const dates = d?.xTime || [];
+  if (!max || !dates.length || index >= dates.length) { cross.hidden = true; return; }
+  const H = 148, count = dates.length;
+  const valid = v => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
+  const x = count === 1 ? 50 : index / (count - 1) * 100;
+  let topPx = H, dots = '';
+  for (const [key, color] of [['proMax', '#4082f5'], ['lite', '#ff8e42'], ['actual', '#10b981']]) {
+    const v = (d[key] || [])[index];
+    if (!valid(v)) continue;
+    const y = H - Number(v) / max * H;
+    if (y < topPx) topPx = y;
+    const left = x > 62; /* 靠右半区标签翻到点左侧，避免溢出卡片 */
+    dots += `<i class="hxDot" style="left:${x}%;top:${y}px;background:${color}"></i>`
+      + `<span class="hxVal${left ? ' left' : ''}" style="left:${x}%;top:${y}px;color:${color};${left ? 'margin-left:-7px' : 'margin-left:7px'}">${Number(v).toFixed(1)}</span>`;
+  }
+  cross.querySelector('.hxDots').innerHTML = dots;
+  const lineTop = dots ? topPx : 0;
+  const line = cross.querySelector('.hxLine');
+  line.style.left = x + '%';
+  line.style.top = lineTop + 'px';
+  line.style.height = (H - lineTop) + 'px';
+  const date = cross.querySelector('.hxDate');
+  date.textContent = String(dates[index]).slice(5, 10);
+  date.style.left = x + '%';
+  date.style.top = Math.max(0, lineTop - 20) + 'px';
+  cross.hidden = false;
+}
+
 function resetTransientHover() {
   hoverElement = null; state.hoverCat = null; state.trendHover = null; state.agentHover = null;
   document.querySelectorAll('.donutWrap').forEach(wrap => highlightDonut(wrap));
-  highlightCategory(); highlightDay(null); updateTrendPick(); highlightAgent(); renderAgentInspector();
+  highlightCategory(); highlightDay(null); highlightHealth(null); updateTrendPick(); highlightAgent(); renderAgentInspector();
 }
 
 const contextViews = new Map();

@@ -1,7 +1,7 @@
 import { categorizeEntry } from '../plugin/mcp/context-composition.mjs';
 
 // Entirely synthetic. No local conversations, credentials or paths are embedded.
-export function fixtureCall(name, args = {}) {
+export async function fixtureCall(name, args = {}) {
   const now = Date.now();
   const day = i => new Date(now - i * 86400000).toLocaleDateString('en-CA');
   const names = ['优化插件上下文交互与数据联动', '修复工具调用的缓存命中统计', '构建项目知识检索接口', '完善深色主题与键盘导航', '排查请求重试与错误恢复', '整理组件的设计规范'];
@@ -57,7 +57,23 @@ export function fixtureCall(name, args = {}) {
     case 'get_usage_json': data = { coding_plan: { level: 'Max', limits: [{ id: 'cp:0', label: '5 小时窗口', total: 600, used: 216, remaining: 384, percent: 36, reset_at: Math.floor(now / 1000) + 7260 }, { id: 'cp:1', label: '每周额度', total: 6000, used: 2520, remaining: 3480, percent: 42, reset_at: Math.floor(now / 1000) + 158400 }] }, plans: [], buckets: [], rates: {}, history: {} }; break;
     case 'get_config': return { content: [{ type: 'text', text: JSON.stringify({ has_key: false, refresh_seconds: 30, insights_available: true, demo: true }) }] };
     case 'get_usage_detail': { const section = { summary: { total: 12460000, daily: 1780000, cacheHit: .9, peakRate: .3 }, totals: Array.from({length:24}, (_,i) => 15000 + i % 7 * 12000), periodTypes: Array.from({length:24}, (_,i) => i % 3 ? 'OFF_PEAK' : 'PEAK'), xTime: Array.from({length:24}, (_,i) => day(0) + ' ' + String(i).padStart(2,'0') + ':00'), items: [{name:'glm-5.3-flash',total:9800000},{name:'glm-5.3',total:2660000}], granularity:'HOUR' }; data = { days:7, model:section, mcp:section }; break; }
-    case 'get_health': data = { days: 7, xTime: Array.from({length:7}, (_,i) => day(6-i)), proMax:[112,126,119,134,140,133,144], lite:[74,82,76,88,94,86,98] }; break;
+    case 'get_health': data = { days: 7, xTime: Array.from({length:7}, (_,i) => day(6-i)), proMax:[112,126,119,134,140,133,144], lite:[74,82,76,88,94,86,98], actual:[61.5,58.2,49.8,64.1,70.3,55.6,67.4], actualN:[87,105,64,138,176,92,60], official:true }; break;
+    case 'get_pricing': {
+      const rec = (key, i, o, source, tier, conf, name, note) => ({ key, name: name || key, source, vendor: '', tier, cur: source === 'builtin' ? 'CNY' : 'USD', in: i, out: o, note: note || '', confidence: conf, price_cny: [i, o] });
+      data = {
+        usd_cny: 7.2, prices: { 'glm-5.3-flash': [1.1, 3.6] }, price_meta: { 'glm-5.3-flash': { source: 'builtin', at: now - 3600e3 } },
+        local_models: [
+          { model: 'GLM-5.3-Flash', norm: 'glm-5.3-flash', calls: 4191, in_t: 987100000, out_t: 1600000, price: [1.1, 3.6], meta: { source: 'builtin', at: now - 3600e3 },
+            recs: [rec('glm-5.3-flash', 1.1, 3.6, 'builtin', 2, 100), rec('glm-5.3-flash', 1.08, 3.6, 'litellm', 2, 100, 'zai/glm-5.3-flash')] },
+          { model: 'GLM-5.3', norm: 'glm-5.3', calls: 1134, in_t: 243100000, out_t: 800000, price: null, meta: null,
+            recs: [rec('glm-5.3', 8, 28, 'builtin', 2, 100), rec('glm-5.3', 10.08, 31.68, 'litellm', 2, 100, 'zai/glm-5.3'), rec('glm-5.3', 0.6, 25.92, 'openrouter', 2, 100, 'z-ai/glm-5.3')] },
+        ],
+        catalog: { builtin: 12, sources: { litellm: { count: 5994, at: now - 7200e3, label: 'LiteLLM 社区目录' }, openrouter: { count: 467, at: now - 7200e3, label: 'OpenRouter 直连/中转' } } },
+        ...(args.query ? { search: [rec('gpt-5.2', 12.6, 100.8, 'builtin', 2, 0), rec('gpt-5.1', 9, 72, 'builtin', 2, 0)] } : {}),
+      }; break;
+    }
+    case 'sync_pricing': await new Promise(r => setTimeout(r, 600)); data = { source: args.source, label: args.source === 'litellm' ? 'LiteLLM 社区目录' : 'OpenRouter 直连/中转', count: args.source === 'litellm' ? 5994 : 467, at: now }; break;
+    case 'set_prices': data = { applied: Object.values(args.prices || {}).filter(v => v != null).length, removed: Object.values(args.prices || {}).filter(v => v == null).length, total: 2, usd_cny: args.usd_cny || 7.2, demo: true }; break;
     default: throw new Error('演示预览不保存配置');
   }
   return { content: [{ type: 'text', text: JSON.stringify({ ok: true, data }) }] };

@@ -47,11 +47,15 @@
         <span class="grp">Key <input id="keyinput" type="password" placeholder="粘贴 bigmodel.cn 控制台的 API Key（长期有效）"></span>
         <button onclick="saveKey(0)">保存</button><button onclick="saveKey(1)">清除</button>
         <span id="keystatus">检查中…</span>
+        <button onclick="openPricing()" title="配置/同步各模型单价（¥/百万 tokens），用于洞察页费用估算">模型价格…</button>
       </div>
     </details>
     <div class="err" id="err"></div>
-    <div id="hero"></div>
-    <div class="cards" id="plans"></div>
+    <!-- 首帧光带骨架：与 app.js 数据骨架/最终版式同几何，数据到位原位替换，区块不跳版 -->
+    <div id="hero">
+      <section class="card hero"><div class="heroHead"><span class="skel" style="width:132px;height:20px"></span><span class="skel" style="width:70px;height:20px"></span><span class="skel" style="width:96px;height:14px"></span></div><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:10px"><span class="skel skelBlock" style="height:64px;border-radius:8px"></span><span class="skel skelBlock" style="height:64px;border-radius:8px"></span></div></section>
+    </div>
+    <div class="cards" id="plans"><span class="skel skelBlock" style="height:28px;border-radius:10px;margin-bottom:10px"></span></div>
 
     <div class="usageDetails">
     <section class="card detail" id="detailCard">
@@ -64,7 +68,16 @@
           <button data-t="model" class="on">模型</button><button data-t="mcp">工具</button>
         </div>
       </div>
-      <div id="detailBody"><div class="err2" style="color:var(--faint)">加载中…</div></div>
+      <div id="detailBody" data-built="1"><!-- 与 app.js ensureDetailSkeleton 保持一致 --><div class="metrics">
+        <div class="metric"><div class="mv" id="dTtl"><span class="skel" style="width:52px;height:14px"></span></div><div class="mk">总量 token</div></div>
+        <div class="metric"><div class="mv" id="dDly"><span class="skel" style="width:52px;height:14px"></span></div><div class="mk">日均 token</div></div>
+        <div class="metric"><div class="mv" id="dCh"><span class="skel" style="width:52px;height:14px"></span></div><div class="mk">缓存命中</div></div>
+        <div class="metric"><div class="mv" id="dPk"><span class="skel" style="width:52px;height:14px"></span></div><div class="mk">峰时占比</div></div>
+      </div>
+      <div class="bars" id="dBars"><div class="skel" style="height:34px;flex:1"></div><div class="skel" style="height:58px;flex:1"></div><div class="skel" style="height:22px;flex:1"></div><div class="skel" style="height:74px;flex:1"></div><div class="skel" style="height:46px;flex:1"></div><div class="skel" style="height:88px;flex:1"></div><div class="skel" style="height:30px;flex:1"></div><div class="skel" style="height:64px;flex:1"></div><div class="skel" style="height:52px;flex:1"></div><div class="skel" style="height:40px;flex:1"></div><div class="skel" style="height:70px;flex:1"></div><div class="skel" style="height:26px;flex:1"></div></div>
+      <div class="barAxis"><span id="dT0"></span><span id="dT1"></span></div>
+      <div class="legend"><span><i style="background:var(--acc)"></i>谷时</span><span><i style="background:var(--mid)"></i>峰时</span><span id="dGran"></span></div>
+      <div class="items" id="dItems"><div class="item"><span class="in"><span class="skel" style="width:70%;height:10px"></span></span><span class="ib"><i class="skel" style="width:72%"></i></span><span class="iv"><span class="skel" style="width:80%;height:10px"></span></span></div><div class="item"><span class="in"><span class="skel" style="width:70%;height:10px"></span></span><span class="ib"><i class="skel" style="width:45%"></i></span><span class="iv"><span class="skel" style="width:80%;height:10px"></span></span></div><div class="item"><span class="in"><span class="skel" style="width:70%;height:10px"></span></span><span class="ib"><i class="skel" style="width:88%"></i></span><span class="iv"><span class="skel" style="width:80%;height:10px"></span></span></div><div class="item"><span class="in"><span class="skel" style="width:70%;height:10px"></span></span><span class="ib"><i class="skel" style="width:60%"></i></span><span class="iv"><span class="skel" style="width:80%;height:10px"></span></span></div><div class="item"><span class="in"><span class="skel" style="width:70%;height:10px"></span></span><span class="ib"><i class="skel" style="width:34%"></i></span><span class="iv"><span class="skel" style="width:80%;height:10px"></span></span></div><div class="item"><span class="in"><span class="skel" style="width:70%;height:10px"></span></span><span class="ib"><i class="skel" style="width:52%"></i></span><span class="iv"><span class="skel" style="width:80%;height:10px"></span></span></div></div></div>
     </section>
 
     <section class="card detail" id="healthCard">
@@ -74,7 +87,10 @@
           <button data-d="1">今天</button><button data-d="7" class="on">7 天</button><button data-d="30">30 天</button>
         </div>
       </div>
-      <div id="healthBody"><div class="err2" style="color:var(--faint)">加载中…</div></div>
+      <div id="healthBody" data-built="1"><!-- 与 app.js ensureHealthSkeleton 保持一致 --><div class="healthSummary" id="healthSummary"><div class="metric"><div class="mk"><span class="skel" style="width:58px;height:9px"></span></div><div class="mv"><span class="skel" style="width:64px;height:14px"></span></div></div><div class="metric"><div class="mk"><span class="skel" style="width:58px;height:9px"></span></div><div class="mv"><span class="skel" style="width:64px;height:14px"></span></div></div><div class="metric"><div class="mk"><span class="skel" style="width:58px;height:9px"></span></div><div class="mv"><span class="skel" style="width:64px;height:14px"></span></div></div></div>
+      <div class="healthChartCaption">解码速度 <span>tokens/s</span> · 细线=官方理论 · 填充=本地实际</div>
+      <div id="hSpeed"><div class="skel skelBlock" style="height:148px;border-radius:4px"></div><div class="skel skelBlock" style="height:10px;width:42%;margin:9px auto 0"></div></div>
+      <div class="healthFoot" id="healthFoot"><span class="skel" style="width:46%;height:10px"></span></div></div>
     </section>
     </div>
     <div class="footer">GLM Usage Dashboard · /glm-usage 随时唤起</div>
@@ -94,22 +110,22 @@
     </div>
     <div class="err" id="insErr"></div>
     <div class="ovTop">
-      <div class="kpiGrid" id="insKpis"></div>
+      <div class="kpiGrid" id="insKpis"><div class="skel skelBlock" style="height:118px;border-radius:10px"></div></div>
       <section class="card dailyCard">
         <div class="lc-title"><span class="t" id="insDailyTitle">近 7 天用量</span><span class="s" id="insDailySub"></span></div>
-        <div class="dailyChart" id="insDailyChart"></div>
+        <div class="dailyChart" id="insDailyChart"><div class="skel skelBlock" style="height:128px;border-radius:6px"></div></div>
         <div class="chartLegend"><span><i style="background:linear-gradient(180deg,#22c55e 0 33.4%,#3b82f6 33.4% 66.7%,#f59e0b 66.7%)"></i>Token（缓存/输入/输出）</span><span><i style="background:#06b6d4"></i>费用（仅含支持计价映射的模型）</span></div>
       </section>
     </div>
     <div class="ovMid">
-      <section class="card"><div class="lc-title"><span class="t">Token 统计</span><span class="s" id="insCacheSub"></span></div><div id="insTokensBody"></div></section>
-      <section class="card"><div class="lc-title"><span class="t">耗时统计</span><span class="s" id="insTpsSub"></span></div><div id="insTimingBody"></div></section>
+      <section class="card"><div class="lc-title"><span class="t">Token 统计</span><span class="s" id="insCacheSub"></span></div><div id="insTokensBody"><div class="skel skelBlock" style="height:158px;border-radius:8px"></div></div></section>
+      <section class="card"><div class="lc-title"><span class="t">耗时统计</span><span class="s" id="insTpsSub"></span></div><div id="insTimingBody"><div class="skel skelBlock" style="height:158px;border-radius:8px"></div></div></section>
     </div>
     <div class="ovQuad">
-      <section class="card heatCard"><div class="lc-title"><span class="t">活跃度</span><span class="s">按日期筛选</span><div class="chipbar heatMetric" id="insHeatMetric" role="group" aria-label="活跃度指标"><button data-m="sessions">会话</button><button data-m="tokens" class="on">Token</button></div></div><div style="overflow-x:auto"><div class="heat" id="insHeatGrid"></div></div><div class="heatScale" id="insHeatScale"></div></section>
-      <section class="card"><div class="lc-title"><span class="t"><svg class="ticon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="13" height="13" rx="3"/><path d="M7 7.5h5M7 11h3"/><path d="M17.5 14v5.5M14.75 16.75h5.5"/></svg>技能加载</span><span class="s" id="insSkillsSub"></span></div><div class="barList" id="insSkillsList"></div></section>
-      <section class="card"><div class="lc-title"><span class="t"><svg class="ticon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>工具调用</span><span class="s" id="insToolsSub"></span></div><div class="barList" id="insToolsList"></div></section>
-      <section class="card"><div class="lc-title"><span class="t"><svg class="ticon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>命令执行</span><span class="s" id="insCmdsSub"></span></div><div class="barList" id="insCmdsList"></div></section>
+      <section class="card heatCard"><div class="lc-title"><span class="t">活跃度</span><span class="s">按日期筛选</span><div class="chipbar heatMetric" id="insHeatMetric" role="group" aria-label="活跃度指标"><button data-m="sessions">会话</button><button data-m="tokens" class="on">Token</button></div></div><div style="overflow-x:auto"><div class="heat" id="insHeatGrid"><div class="skel skelBlock" style="height:150px;border-radius:6px;width:min(560px,100%)"></div></div></div><div class="heatScale" id="insHeatScale"></div></section>
+      <section class="card"><div class="lc-title"><span class="t"><svg class="ticon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="13" height="13" rx="3"/><path d="M7 7.5h5M7 11h3"/><path d="M17.5 14v5.5M14.75 16.75h5.5"/></svg>技能加载</span><span class="s" id="insSkillsSub"></span></div><div class="barList" id="insSkillsList"><div class="skel skelBlock" style="height:132px;border-radius:8px"></div></div></section>
+      <section class="card"><div class="lc-title"><span class="t"><svg class="ticon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>工具调用</span><span class="s" id="insToolsSub"></span></div><div class="barList" id="insToolsList"><div class="skel skelBlock" style="height:132px;border-radius:8px"></div></div></section>
+      <section class="card"><div class="lc-title"><span class="t"><svg class="ticon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>命令执行</span><span class="s" id="insCmdsSub"></span></div><div class="barList" id="insCmdsList"><div class="skel skelBlock" style="height:132px;border-radius:8px"></div></div></section>
     </div>
       <section class="card">
       <div class="lc-title sessHead">
@@ -125,7 +141,7 @@
         </div>
       </div>
       <div class="groupChips" id="sessGroups"></div>
-      <div class="sessGrid" id="insSessions"></div>
+      <div class="sessGrid" id="insSessions"><div class="skel skelBlock" style="height:76px;border-radius:12px;margin-bottom:9px"></div><div class="skel skelBlock" style="height:76px;border-radius:12px;margin-bottom:9px"></div><div class="skel skelBlock" style="height:76px;border-radius:12px"></div></div>
     </section>
     <div class="footer">洞察数据来自本地 ZCode 会话记录 · 只读访问</div>
   </div>
@@ -141,7 +157,7 @@
     <div class="ctxTop">
       <section class="card">
         <div class="lc-title"><span class="t">Context Stats</span><span class="s" id="ctxStatsSub"></span></div>
-        <div class="csKpis" id="ctxStats"></div>
+        <div class="csKpis" id="ctxStats"><div class="skel skelBlock" style="height:92px;border-radius:8px"></div></div>
         <div class="csEvents" id="ctxEvCounts"></div>
         <div class="csRows">
           <div><div class="csRow"><span class="k">Input / Output</span><span class="n" id="ctxIoN"></span></div><div class="chipRow" id="ctxIoChips"></div></div>
@@ -152,19 +168,19 @@
       </section>
       <section class="card infoCard">
         <div class="lc-title"><span class="t">会话信息</span></div>
-        <div id="ctxInfo"></div>
+        <div id="ctxInfo"><div class="skel skelBlock" style="height:120px;border-radius:8px"></div></div>
       </section>
     </div>
     <div class="ovMid">
-      <section class="card"><div class="lc-title"><span class="t">Token 统计</span><span class="s" id="ctxCacheSub"></span></div><div id="ctxTokensBody"><span class="empty">—</span></div></section>
-      <section class="card"><div class="lc-title"><span class="t">耗时统计</span><span class="s" id="ctxTpsSub"></span></div><div id="ctxTimingBody"><span class="empty">—</span></div></section>
+      <section class="card"><div class="lc-title"><span class="t">Token 统计</span><span class="s" id="ctxCacheSub"></span></div><div id="ctxTokensBody"><div class="skel skelBlock" style="height:158px;border-radius:8px"></div></div></section>
+      <section class="card"><div class="lc-title"><span class="t">耗时统计</span><span class="s" id="ctxTpsSub"></span></div><div id="ctxTimingBody"><div class="skel skelBlock" style="height:158px;border-radius:8px"></div></div></section>
     </div>
     <div class="ctxWorkspace"><div class="ctxPrimary">
       <section class="card" id="currentCard">
         <div class="lc-title"><span class="t">Current Context</span><span class="s" id="ctxCurModel"></span></div>
         <div class="bigCtx"><span class="n" id="ctxCurN">—</span><span class="w" id="ctxCurW"></span><span class="pct" id="ctxCurPct"></span></div>
-        <div class="stackBar" id="ctxCurBar"></div>
-        <div class="catLegend" id="ctxCurLegend"></div><div class="estimateNote" id="estimateNote"></div>
+        <div class="stackBar" id="ctxCurBar"><div class="skel skelBlock" style="height:10px;border-radius:5px"></div></div>
+        <div class="catLegend" id="ctxCurLegend"><div class="skel skelBlock" style="height:40px;border-radius:6px;margin-top:8px"></div></div><div class="estimateNote" id="estimateNote"></div>
       </section>
     <section class="card" style="margin-bottom:12px">
       <div class="lc-title">
@@ -175,12 +191,12 @@
         </span>
       </div>
       <div id="trendLegend" class="chartLegend"></div>
-      <div class="trendBox" id="ctxTrend"><span class="empty">—</span></div>
+      <div class="trendBox" id="ctxTrend"><div class="skel skelBlock" style="height:190px;border-radius:6px"></div></div>
       <div class="trendDetail" id="ctxTrendDetail" hidden></div>
     </section>
     <section class="card">
       <div class="lc-title"><span class="t">Context Events</span><span class="s" id="ctxEvSub"></span></div>
-      <div class="evList" id="ctxEvents"><span class="empty">—</span></div>
+      <div class="evList" id="ctxEvents"><div class="skel skelBlock" style="height:170px;border-radius:8px"></div></div>
     </section>
     </div>
       <section class="card browserPanel" id="browserPanel">
@@ -195,10 +211,10 @@
           <div class="chipbar" id="browserSnapshot"><button data-snapshot="live" class="on">最新请求</button><button data-snapshot="prev">上一请求</button></div>
           <span id="browserMeta" class="muted"></span>
         </div>
-        <div id="browserStrip" class="dnaStrip" aria-label="上下文条目分布"></div>
+        <div id="browserStrip" class="dnaStrip" aria-label="上下文条目分布"><div class="skel skelBlock" style="height:26px;border-radius:5px"></div></div>
         <div class="browserSearch"><input type="search" class="searchInput" id="browserSearch" aria-label="搜索上下文条目" placeholder="搜索条目、内容或工具…"><button id="browserClear" class="textButton" hidden>清除</button></div>
         <div class="browserSelection" id="browserSelection" hidden></div>
-        <div id="ctxBrowser"><span class="empty">—</span></div>
+        <div id="ctxBrowser"><div class="skel skelBlock" style="height:340px;border-radius:8px"></div></div>
       </section>
     </div>
     <div class="footer">Live 构成解析自本地 model-io 日志尾部 · 只读</div>
@@ -220,7 +236,7 @@
     <section class="card" style="margin-bottom:12px">
       <div class="lc-title"><span class="t">Agent Network</span><span class="s" id="fleetNetSub"></span></div>
       <div class="agentWorkspace">
-        <div class="agentGrid" id="fleetGrid"><div class="agentTreeWrap"><svg class="agentEdges" id="agentEdges" aria-hidden="true"></svg><div id="fleetNodes"></div></div></div>
+        <div class="agentGrid" id="fleetGrid"><div class="agentTreeWrap"><svg class="agentEdges" id="agentEdges" aria-hidden="true"></svg><div id="fleetNodes"><div class="skel skelBlock" style="height:220px;border-radius:10px"></div></div></div></div>
         <section id="agentInspector" class="agentInspector" aria-label="Agent 会话预览"></section>
       </div>
     </section>
@@ -228,17 +244,17 @@
       <section class="card">
         <div class="lc-title"><span class="t">跨 Agent 协作</span><span class="s" id="fleetCommsSub"></span></div>
         <div class="chipbar" id="commsChips" role="group" aria-label="协作记录筛选"></div>
-        <div class="commsList" id="fleetComms"><span class="empty">—</span></div>
+        <div class="commsList" id="fleetComms"><div class="skel skelBlock" style="height:130px;border-radius:8px"></div></div>
       </section>
       <section class="card">
         <div class="lc-title"><span class="t">协作任务</span><span class="s" id="fleetWorkSub"></span></div>
         <div class="chipbar" id="workChips" role="group" aria-label="协作任务筛选"></div>
-        <div class="commsList" id="fleetWork"><span class="empty">—</span></div>
+        <div class="commsList" id="fleetWork"><div class="skel skelBlock" style="height:130px;border-radius:8px"></div></div>
       </section>
     </div>
     <section class="card">
       <div class="lc-title"><span class="t">成员明细</span><span class="s" id="fleetSub"></span></div>
-      <div id="fleetMembers"><span class="empty">—</span></div>
+      <div id="fleetMembers"><div class="skel skelBlock" style="height:170px;border-radius:8px"></div></div>
     </section>
     <div class="footer">子代理为 ZCode 派生的会话（parent_id 关联）</div>
   </div>
@@ -258,5 +274,6 @@
 <script>/* @inline:context-browser.js */</script>
 <script>/* @inline:interactions.js */</script>
 <script>/* @inline:activity.js */</script>
+<script>/* @inline:pricing-ui.js */</script>
 <script>/* @inline:persistence.js */</script>
 </body></html>
