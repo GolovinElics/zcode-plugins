@@ -21,6 +21,7 @@
 "use strict";
 
 import { readViews, writeView } from './view-store.mjs';
+import * as history from './history.mjs';
 import crypto from "node:crypto";
 import os from "node:os";
 import fs from "node:fs";
@@ -39,7 +40,7 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* 回退 CLI 
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PANEL_URI = "ui://glm-usage/panel.html";
-const VERSION = "2.8.2";
+const VERSION = "2.8.3";
 const APP_VERSION = "3.18.2";
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8791"; // 仅当用户自建网页版时提示用，不作为依赖
 
@@ -120,7 +121,30 @@ function loadDeviceMid() {
 // 零配置兜底：读取"本机用户本人"在 ZCode 内嵌浏览器里的 bigmodel.cn 登录态（Cookie 库中该值为明文存储）。
 // 意图与 ZCode 桌面版自身一致（它同样从该库取此 Cookie 调用同族接口）；令牌仅在本机进程内用于请求
 // open.bigmodel.cn，不写日志、不外传。用户配置 API Key（set_coding_key）后本路径不会被调用。
+//
+// 进程内缓存：面板按 refresh_seconds（可低至 3s）轮询配额，若每次都整库拷贝 Chromium Cookie DB，
+// 既浪费磁盘 I/O 也可能在浏览器写入瞬间拷出撕裂副本。令牌轮换频率远低于轮询频率，
+// 成功缓存 10 分钟、失败（未登录）缓存 60 秒；上游判定令牌失效时由调用方 invalidateCodingPlanToken() 清除。
+let _codingPlanTokenMemo = null; // { at, ok, value | error }
+const TOKEN_MEMO_OK_MS = 10 * 60 * 1000;
+const TOKEN_MEMO_ERR_MS = 60 * 1000;
+function invalidateCodingPlanToken() { _codingPlanTokenMemo = null; }
 function loadCodingPlanToken() {
+  if (_codingPlanTokenMemo) {
+    const age = Date.now() - _codingPlanTokenMemo.at;
+    if (_codingPlanTokenMemo.ok && age < TOKEN_MEMO_OK_MS) return _codingPlanTokenMemo.value;
+    if (!_codingPlanTokenMemo.ok && age < TOKEN_MEMO_ERR_MS) throw new Error(_codingPlanTokenMemo.error);
+  }
+  try {
+    const value = readCodingPlanTokenFromCookieDb();
+    _codingPlanTokenMemo = { at: Date.now(), ok: true, value };
+    return value;
+  } catch (e) {
+    _codingPlanTokenMemo = { at: Date.now(), ok: false, error: e.message };
+    throw e;
+  }
+}
+function readCodingPlanTokenFromCookieDb() {
   if (process.platform !== "darwin") throw new Error("未找到网页登录令牌");
   const tmp = path.join(os.tmpdir(), `zcode-cookies-${process.pid}.db`);
   fs.copyFileSync(EMBEDDED_COOKIE_DB, tmp);
@@ -174,6 +198,7 @@ async function fetchCodingPlan() {
   const json = await httpsGetJson("https://open.bigmodel.cn/api/monitor/usage/quota/limit", { Authorization: token });
   if (!json.success) {
     const authRejected = json.code === 1001 || /身份验证|鉴权|令牌/.test(json.msg || "");
+    if (authRejected && !apiKey) invalidateCodingPlanToken(); // 登录态可能已轮换，下次轮询重读 Cookie
     throw new Error(authRejected ? noCredHint : json.msg || `接口返回 code=${json.code}`);
   }
   const limits = (json.data?.limits || []).map((l, i) => ({
@@ -317,24 +342,11 @@ function normalizeBalance(data) {
   return { server_time: data.server_time || nowSec, fetched_at: Date.now(), plans, buckets };
 }
 
-/* ---------- 历史采样与速率（~/.glm-usage/history.json，48h） ---------- */
+/* ---------- 历史采样与速率（~/.glm-usage/history.json，48h；实现见 history.mjs） ---------- */
 
-function readHistory() {
-  try { return JSON.parse(fs.readFileSync(HISTORY_FILE, "utf8")); } catch { return []; }
-}
-
+const readHistory = () => history.readHistory(HISTORY_FILE);
 function appendHistory(values) {
-  const t = Math.floor(Date.now() / 1000);
-  const minGap = Math.max(10, Number(loadConfig().sample_seconds) || 60);
-  const h = readHistory();
-  const last = h[h.length - 1];
-  if (last && t - last.t < minGap) last.values = values;
-  else h.push({ t, values });
-  const pruned = h.filter((x) => x.t >= t - 48 * 3600);
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(HISTORY_FILE, JSON.stringify(pruned), { mode: 0o600 });
-  } catch { /* 忽略 */ }
+  history.appendHistory(HISTORY_FILE, values, { sampleSeconds: loadConfig().sample_seconds });
 }
 
 function computeRates(current) {
@@ -367,6 +379,8 @@ function historySeries() {
   for (const s of h) for (const [id, v] of Object.entries(s.values || {})) {
     (out[id] = out[id] || []).push([s.t, v]);
   }
+  // sparkline 只消费 90 点；按 id 步长封顶，避免 48h 窗口点数随采样无限膨胀
+  for (const id of Object.keys(out)) out[id] = history.strideCap(out[id], 180);
   return out;
 }
 
@@ -740,12 +754,11 @@ function readTailIoEntries(f, size, want, capBytes) {
 
 const _ioCache = new Map(); // file -> { size, mtimeMs, at, entries, bytes }（最新在尾部，LRU 逐出）
 const IO_TAIL_BYTES = 24 * 1024 * 1024; // 单条 entry 可能包含完整上下文，上限放宽
-const IO_CACHE_MS = 4000;
 const IO_CACHE_MAX_ENTRIES = 8;
 const IO_CACHE_MAX_BYTES = 64 * 1024 * 1024; // 估算字节（按源 JSON 行 UTF-8 长度）
 let _ioCacheBytes = 0;
 
-// 命中即刷新 LRU 位次（delete+set 移到尾部）；TTL 判定语义不变
+// 命中即刷新 LRU 位次（delete+set 移到尾部）
 function ioCacheTouch(f) {
   const c = _ioCache.get(f);
   if (c) { _ioCache.delete(f); _ioCache.set(f, c); }
@@ -782,7 +795,9 @@ function readIoEntries(sessionId, want = 2) {
   const st = fs.statSync(f);
   const c = _ioCache.get(f);
   if (c) ioCacheTouch(f);
-  if (c && c.size === st.size && c.mtimeMs === st.mtimeMs && Date.now() - c.at < IO_CACHE_MS) {
+  // size+mtime 指纹未变即命中：条目是文件内容的纯函数，追加写入必然推进 mtime。
+  // 不设 TTL——上下文页每 4s 轮询，TTL 会让未变化的文件也周期性重读+重解析
+  if (c && c.size === st.size && c.mtimeMs === st.mtimeMs) {
     return c.entries.slice(0, want);
   }
   const got = readTailIoEntries(f, st.size, Math.max(want, 2), IO_TAIL_BYTES);
@@ -1394,7 +1409,7 @@ function fetchActivity(args = {}) {
     : joined;
   return { kind, truncated: filtered.length > 500, limit: 500,
     rows: filtered.slice(0, 500).map(r => ({ ...r, ts: Number(r.ts), dur: Number(r.dur || 0),
-      command: r.command ? String(r.command).slice(0, 8000) : null,
+      command: r.command ? String(r.command).slice(0, 2000) : null,
       program: r.command ? String(r.command).trim().split(/[\s;|&]/)[0].replace(/^.*\//, "") : r.name,
       background: !!r.background })) };
 }

@@ -49,4 +49,12 @@ async function restorePersistentViews() {
 let pendingInsightPins=null;
 const originalRenderInsights=renderInsights;
 renderInsights=function(){originalRenderInsights();if(pendingInsightPins){for(const id of ['insTokensBody','insTimingBody']){const w=document.getElementById(id)?.querySelector('.donutWrap');if(w&&pendingInsightPins[id]){w.dataset.pinned=pendingInsightPins[id];highlightDonut(w);}}pendingInsightPins=null;}};
-for(const event of ['click','input','change','keydown'])document.addEventListener(event,()=>queueMicrotask(persistViews));
+// 视图状态防抖落盘：这些事件在连续输入时高频触发（搜索框每键一次），
+// 签名必变 → 每键一次 save_view_state RPC + 原子文件写。延迟 600ms 合并，
+// 并在页面隐藏/关闭时立即冲刷，避免丢最后一段输入。
+let persistTimer=null;
+function persistViewsSoon(){if(persistTimer)clearTimeout(persistTimer);persistTimer=setTimeout(()=>{persistTimer=null;persistViews();},600);}
+function flushPersistViews(){if(persistTimer){clearTimeout(persistTimer);persistTimer=null;persistViews();}}
+addEventListener('pagehide',flushPersistViews);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)flushPersistViews();});
+for(const event of ['click','input','change','keydown'])document.addEventListener(event,persistViewsSoon);
