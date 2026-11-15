@@ -13,8 +13,8 @@ function donut(segs, centerTop, centerSub, size = 118) {
 function donutLegendBlock(segs, centerTop, centerSub, size, timing = false) {
   const total = segs.reduce((a, s) => a + s.v, 0) || 1;
   return `<div class="donutWrap">${donut(segs, centerTop, centerSub, size)}<div class="legendGrid">${segs.map((s, i) => {
-    const value = timing ? durMs(s.v) : cnum(s.v), pct = Math.round(s.v / total * 1000) / 10;
-    return `<button class="lgRow" data-slice="${esc(s.n || String(i))}" data-value="${esc(value)}" data-label="${esc(s.n)}" data-tip="${esc(s.n)} · ${timing ? durMs(s.v) : fmt(s.v) + ' tokens'} · ${pct}%\n点击固定高亮，再次点击或按 Esc 取消" aria-pressed="false"><i style="background:${s.c}"></i><span class="n">${esc(s.n)}</span><span class="p">${pct}%</span><span class="v">${value}</span></button>`;
+    const value = (timing ? durMs(s.v) : cnum(s.v)) + (s.sub ? ' · ' + s.sub : ''), pct = Math.round(s.v / total * 1000) / 10;
+    return `<button class="lgRow" data-slice="${esc(s.n || String(i))}" data-value="${esc(value)}" data-label="${esc(s.n)}" data-tip="${esc(s.n)} · ${timing ? durMs(s.v) : fmt(s.v) + ' tokens'}${s.sub ? ' · ' + esc(s.sub) : ''} · ${pct}%\n点击固定高亮，再次点击或按 Esc 取消" aria-pressed="false"><i style="background:${s.c}"></i><span class="n">${esc(s.n)}</span><span class="p">${pct}%</span><span class="v">${esc(value)}</span></button>`;
   }).join('')}</div></div>`;
 }
 function dateKey(value) {
@@ -22,52 +22,112 @@ function dateKey(value) {
 }
 function renderDaily(d) {
   if (!d) return;
-  const count = state.range === 'today' ? 1 : state.range === '30d' ? 30 : 7;
+  const count = 7; /* 近 7 天用量固定展示最近 7 天，不随全局范围筛选变化（对齐 dsh-context）；数据来自服务端固定的 daily7 序列 */
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const source = new Map((d.daily || []).map(x => [x.day, x]));
+  const source = new Map((d.daily7 || d.daily || []).map(x => [x.day, x]));
   const rows = Array.from({ length: count }, (_, i) => { const date = new Date(today); date.setDate(date.getDate() - count + i + 1); const day = dateKey(date); return source.get(day) || { day, tokens: 0, steps: 0, sessions: 0 }; });
   const max = Math.max(1, ...rows.map(x => x.tokens));
-  document.getElementById('insDailyTitle').textContent = count === 1 ? '今日用量' : `近 ${count} 天用量`;
-  document.getElementById('insDailySub').textContent = `${cnum(rows.reduce((a, x) => a + x.tokens, 0))} tokens`;
-  patchHTML('insDailyChart', `<div class="dailyAxis"><span>${cnum(max)}</span><span>${cnum(max / 2)}</span><span>0</span></div><div class="dailyPlot">${rows.map((x, i) => {
-    const cr = x.cache_read || 0, input = Math.max((x.input_t || 0) - cr, 0), output = x.output_t || 0;
+  const maxCost = Math.max(0, ...rows.map(x => Number(x.cost) || 0));
+  document.getElementById('insDailyTitle').textContent = '近 7 天用量';
+  const costAll = rows.reduce((a, x) => a + (Number(x.cost) || 0), 0);
+  document.getElementById('insDailySub').textContent = `${cnum(rows.reduce((a, x) => a + x.tokens, 0))} tokens` + (costAll > 0 ? ` · ¥${costAll.toFixed(2)}（仅计价模型）` : '');
+  const ticks = [1, .75, .5, .25, 0];
+  // 费用轴对齐 dsh：顶档为实际最大值，0 档不带 ¥；范围内无计价数据时用 ¥— 占位，位置保留
+  const yuanTick = f => f === 0 ? '0' : maxCost > 0 ? '¥' + (Math.round(maxCost * f * 100) / 100) : '¥—';
+  patchHTML('insDailyChart', `<div class="dailyAxis">${ticks.map(f => `<span>${cnum(max * f)}</span>`).join('')}</div><div class="dailyPlot">${rows.map((x, i) => {
+    const cr = x.cache_read || 0, input = Math.max((x.input_t || 0) - cr, 0), output = x.output_t || 0, cost = Number(x.cost) || 0;
     const h = n => (n / max * 100).toFixed(3);
-    return `<button class="col ${state.day === x.day ? 'selected' : ''}" data-day="${x.day}" aria-pressed="${state.day === x.day}" aria-label="${x.day}，${fmt(x.tokens)} tokens，筛选会话" data-tip="${x.day}\n${fmt(x.tokens)} tokens · ${x.steps} 步 · ${x.sessions || 0} 个会话\n缓存 ${cnum(cr)} · 新输入 ${cnum(input)} · 输出 ${cnum(output)}\n点击筛选当日会话"><i style="height:${h(output)}%;background:#f59e0b"></i><i style="height:${h(input)}%;background:#3b82f6"></i><i style="height:${h(cr)}%;background:#22c55e"></i><span class="lb">${count <= 7 || i % 5 === 0 || i === count - 1 ? x.day.slice(5) : ''}</span></button>`;
-  }).join('')}</div>`);
+    const hc = maxCost > 0 ? (cost / maxCost * 100).toFixed(3) : '0';
+    const showLabel = count <= 7 || i % 5 === 0 || i === count - 1;
+    return `<span class="col" role="img" aria-label="${x.day}，Token ${fmt(x.tokens)}，缓存 ${cnum(cr)} · 输入 ${cnum(input)} · 输出 ${cnum(output)}${cost > 0 ? `，费用 ¥${cost.toFixed(2)}` : ''}" data-tip="${x.day} · Token ${fmt(x.tokens)}\n缓存 ${cnum(cr)} · 输入 ${cnum(input)} · 输出 ${cnum(output)}${cost > 0 ? `\n费用 ¥${cost.toFixed(2)}（仅计价模型）` : ''}"><span class="tv">${showLabel && x.tokens > 0 ? cnum(x.tokens) : ''}</span><span class="pair"><span class="bar"><i style="height:${h(output)}%;background:#f59e0b"></i><i style="height:${h(input)}%;background:#3b82f6"></i><i style="height:${h(cr)}%;background:#22c55e"></i></span><span class="bar cost"><i style="height:${hc}%;background:#06b6d4"></i></span></span><span class="lb">${count <= 7 || i % 5 === 0 || i === count - 1 ? x.day.slice(5) : ''}</span></span>`;
+  }).join('')}</div><div class="dailyAxis costAxis">${ticks.map(f => `<span>${yuanTick(f)}</span>`).join('')}</div>`);
 }
 function renderHeatmap(d) {
   if (!d) return;
   const values = new Map((d.heatmap || []).map(x => [x.day, x]));
   const end = new Date(); end.setHours(0, 0, 0, 0);
-  const start = new Date(end); start.setDate(start.getDate() - 83);
-  const pad = (start.getDay() + 6) % 7;
-  const max = Math.max(1, ...(d.heatmap || []).map(x => x.tokens));
-  const cells = Array.from({ length: pad }, () => '<span></span>');
-  for (let i = 0; i < 84; i++) {
-    const date = new Date(start); date.setDate(date.getDate() + i); const day = dateKey(date);
-    const value = values.get(day) || { tokens: 0, steps: 0 };
-    const color = value.tokens ? `color-mix(in srgb,#3b82f6 ${Math.round(25 + Math.sqrt(value.tokens / max) * 75)}%,var(--card2))` : 'var(--card2)';
-    cells.push(`<button data-day="${day}" aria-pressed="${state.day === day}" class="${state.day === day ? 'selected' : ''}" style="background:${color}" data-tip="${day}\n${fmt(value.tokens)} tokens · ${value.steps} 步" aria-label="${day}，${fmt(value.tokens)} tokens"></button>`);
+  // 对齐 dsh：周日对齐的周列 × 8 周，跨月列上浮月份标签，行标仅周一/三/五，会话 / Token 消耗双指标离散 5 级色阶
+  const weeks = 8;
+  const lastSunday = new Date(end); lastSunday.setDate(lastSunday.getDate() - lastSunday.getDay());
+  const start = new Date(lastSunday); start.setDate(start.getDate() - 7 * (weeks - 1));
+  const mode = state.heatMode === 'sessions' ? 'sessions' : 'tokens';
+  const max = Math.max(1, ...(d.heatmap || []).map(x => mode === 'sessions' ? (x.sessions || 0) : x.tokens));
+  const level = n => n <= 0 || max <= 0 ? 0 : (n /= max) <= .25 ? 1 : n <= .5 ? 2 : n <= .75 ? 3 : 4;
+  let cols = '';
+  for (let w = 0; w < weeks; w++) {
+    const sun = new Date(start); sun.setDate(sun.getDate() + 7 * w);
+    const sat = new Date(sun); sat.setDate(sat.getDate() + 6);
+    const opens = w === 0 || sun.getMonth() !== sat.getMonth() || sun.getDate() === 1;
+    let cells = '';
+    for (let i = 0; i < 7; i++) {
+      const date = new Date(sun); date.setDate(date.getDate() + i); const day = dateKey(date);
+      if (date > end) { cells += '<span class="hcell future" aria-hidden="true"></span>'; continue; }
+      const v = values.get(day) || { tokens: 0, sessions: 0 };
+      const tip = `${day}\n${v.sessions || 0} 个活跃会话\n${fmt(v.tokens)} token`;
+      cells += `<button data-day="${day}" class="hcell l${level(mode === 'sessions' ? (v.sessions || 0) : v.tokens)}${state.day === day ? ' selected' : ''}" aria-pressed="${state.day === day}" data-tip="${tip}" aria-label="${day}，${v.sessions || 0} 个活跃会话，${fmt(v.tokens)} token"></button>`;
+    }
+    cols += `<div class="hcol">${opens ? `<span class="hmon" aria-hidden="true">${sat.getMonth() + 1}月</span>` : ''}${cells}</div>`;
   }
-  patchHTML('insHeatGrid', cells.join(''));
-  patchHTML('insHeatScale', '<span>少</span>' + [0, 25, 50, 75, 100].map(x => `<i style="background:color-mix(in srgb,#3b82f6 ${x}%,var(--card2))"></i>`).join('') + '<span>多</span>');
+  patchHTML('insHeatGrid', `<div class="hwds" aria-hidden="true">${[0, 1, 2, 3, 4, 5, 6].map(r => `<span class="hwd">${r === 1 ? '星期一' : r === 3 ? '星期三' : r === 5 ? '星期五' : ''}</span>`).join('')}</div><div class="hcols">${cols}</div>`);
+  patchHTML('insHeatScale', '<span>少</span>' + [0, 1, 2, 3, 4].map(l => `<i class="hcell l${l}"></i>`).join('') + '<span>多</span>');
+}
+const SESS_PAGE = 12;
+function pagerPages(cur, total) {
+  const pages = [...new Set([1, total, cur - 1, cur, cur + 1])].filter(p => p >= 1 && p <= total).sort((a, b) => a - b);
+  const out = []; let prev = 0;
+  for (const p of pages) { if (p - prev > 1) out.push('…'); out.push(p); prev = p; }
+  return out;
 }
 function renderSessions() {
   const all = state.insights?.sessions || [], groups = new Map();
-  all.forEach(s => { const path = s.directory || ''; groups.set(path, (groups.get(path) || 0) + 1); });
-  patchHTML('sessGroups', `<button class="gchip ${!state.group ? 'on' : ''}" data-group="" aria-pressed="${!state.group}">全部 <b>${all.length}</b></button>` + [...groups].map(([path, n]) => `<button class="gchip ${state.group === path ? 'on' : ''}" data-group="${esc(path)}" data-tip="${esc(path)}" aria-pressed="${state.group === path}">${esc(dirName({ directory: path }))} <b>${n}</b></button>`).join(''));
+  // 分组对齐 dsh 工作区语义：ZCode 未命名草稿工作区（.zcode/workspace/draft-*）聚合为「草稿」，真实目录按路径分组
+  const DRAFT_RE = /\.zcode\/workspace\/draft-/;
+  const groupKeyOf = s => { const d = String(s.directory || ''); return !d ? '' : DRAFT_RE.test(d) ? '@draft' : d; };
+  const groupLabel = key => !key ? '未分组' : key === '@draft' ? '草稿' : dirName({ directory: key });
+  const groupTip = key => !key ? '无目录信息' : key === '@draft' ? 'ZCode 未命名草稿工作区（.zcode/workspace/draft-*）聚合展示' : key;
+  all.forEach(s => { const key = groupKeyOf(s); groups.set(key, (groups.get(key) || 0) + 1); });
+  patchHTML('sessGroups', `<button class="gchip ${!state.group ? 'on' : ''}" data-group="" aria-pressed="${!state.group}">全部 <b>${all.length}</b></button>` + [...groups].map(([key, n]) => `<button class="gchip ${state.group === key ? 'on' : ''}" data-group="${esc(key)}" data-tip="${esc(groupTip(key))}" aria-pressed="${state.group === key}">${esc(groupLabel(key))} <b>${n}</b></button>`).join(''));
+  if (state.group && !all.some(s => groupKeyOf(s) === state.group)) state.group = '';
   const dayRecord = [...(state.insights?.daily || []), ...(state.insights?.heatmap || [])].find(x => x.day === state.day);
   const daySessions = dayRecord?.session_ids ? new Set(Array.isArray(dayRecord.session_ids) ? dayRecord.session_ids : dayRecord.session_ids.split(',')) : null;
-  let list = all.filter(s => (!state.group || s.directory === state.group) && (!state.archive || !s.archived)
+  let list = all.filter(s => (!state.group || groupKeyOf(s) === state.group) && (!state.archive || !s.archived)
     && (!state.search || `${s.title} ${s.directory} ${s.last_msg || ''} ${s.model || ''}`.toLowerCase().includes(state.search))
-    && (!state.day || (daySessions ? daySessions.has(s.id) : dateKey(s.updated) === state.day)));
+    && (!state.day || (daySessions ? daySessions.has(s.id) : dateKey(s.updated) === state.day))
+    && (!state.pick || state.pick.sessions == null || state.pick.sessions.has(s.id)));
   list = list.slice().sort((a, b) => (b[state.sortKey] || 0) - (a[state.sortKey] || 0));
+  // 当前会话在筛选结果内置顶并标注（对齐 dsh：全部或所在分组选中时排第一）
+  const currentId = state.insights?.current_id || null;
+  if (currentId) { const at = list.findIndex(s => s.id === currentId); if (at > 0) list.unshift(list.splice(at, 1)[0]); }
   document.getElementById('insSessCount').textContent = `${list.length} / ${all.length} 个${state.day ? ' · ' + state.day : ''}`;
-  document.getElementById('clearSessionFilters').hidden = !(state.day || state.group || state.search || state.archive);
-  patchHTML('insSessions', list.map(s => {
+  document.getElementById('clearSessionFilters').hidden = !(state.day || state.group || state.search || state.archive || state.pick);
+  // 排行行筛选 chip（对齐 dsh lc-ov-day-chip：可单击清除）
+  updatePickChip();
+  /* 分页（比 dsh 前后页翻页多数字页码）：筛选/排序变化回第一页；新选中会话自动跳到所在页；背景刷新保持当前页 */
+  const filterSig = [state.search, state.group, state.archive, state.day, state.sortKey, state.pick ? state.pick.kind + ':' + state.pick.name : ''].join('|');
+  if (renderSessions.filterSig != null && renderSessions.filterSig !== filterSig) state.sessPage = 1;
+  renderSessions.filterSig = filterSig;
+  if (state.sessionId && state.sessPageFor !== state.sessionId) {
+    const at = list.findIndex(s => s.id === state.sessionId);
+    if (at >= 0) state.sessPage = Math.floor(at / SESS_PAGE) + 1;
+    state.sessPageFor = state.sessionId;
+  } else if (!state.sessionId) state.sessPageFor = null;
+  const pageCount = Math.max(1, Math.ceil(list.length / SESS_PAGE));
+  state.sessPage = Math.min(Math.max(1, Math.floor(state.sessPage) || 1), pageCount);
+  const pageRows = list.slice((state.sessPage - 1) * SESS_PAGE, state.sessPage * SESS_PAGE);
+  const pager = pageCount > 1 ? `<nav class="pager" role="navigation" aria-label="会话分页" data-pages="${pageCount}"><button class="pgBtn" data-pg="prev" aria-label="上一页"${state.sessPage <= 1 ? ' disabled' : ''}>‹</button>${pagerPages(state.sessPage, pageCount).map(p => p === '…' ? '<span class="pgGap">…</span>' : `<button class="pgBtn${p === state.sessPage ? ' on' : ''}" data-pg="${p}"${p === state.sessPage ? ' aria-current="page"' : ''}>${p}</button>`).join('')}<button class="pgBtn" data-pg="next" aria-label="下一页"${state.sessPage >= pageCount ? ' disabled' : ''}>›</button><span class="pgInfo">第 ${state.sessPage} / ${pageCount} 页</span></nav>` : '';
+  patchHTML('insSessions', pageRows.map(s => {
     const pct = s.window ? Math.round(s.context / s.window * 1000) / 10 : null;
-    return `<button class="sCard ${s.id === state.sessionId ? 'on' : ''}" data-sid="${esc(s.id)}" aria-label="查看会话：${esc(s.title)}"><div class="sHead"><span class="sTitle">${esc(s.title || '无标题会话')}</span><span class="sTimes"><span class="sTime">${agoTs(s.updated)}</span><span class="sCreated">${dateKey(s.created)}</span></span></div><div class="sCrumb"><span class="sPill" data-tip="${esc(s.directory)}">${esc(dirName(s))}</span>${s.parent_id ? '<span class="sPill">子代理</span>' : ''}${s.archived ? '<span class="sPill">已归档</span>' : ''}<span class="sPill">${esc(s.model || '未知模型')}</span></div><div class="sBody">${donut([{ v: s.context, c: '#3b82f6' }, { v: Math.max((s.window || s.context) - s.context, 0), c: 'var(--bd)' }], cnum(s.context), pct == null ? '上下文' : pct + '%', 76)}<div class="sStats"><div class="sStat"><span class="k">轮次</span><span class="v">${s.turns} 轮 ${s.steps} 步</span></div><div class="sStat"><span class="k">Token 总用量</span><span class="v">${cnum(s.tokens)}</span></div><div class="sStat"><span class="k">上下文窗口</span><span class="v">${cnum(s.window)}</span></div></div></div><div class="sPreview"><span class="k">最新消息</span><span class="v" data-tip="${esc(s.last_msg || '')}">${esc(s.last_msg || '暂无文本消息')}</span><span class="cardArrow" aria-hidden="true">↗</span></div></button>`;
-  }).join('') || '<div class="empty">当前筛选没有匹配会话。可清除筛选或扩大时间范围。</div>');
+    const parts = (s.parts || []).filter(p => p.tokens > 0), partSum = parts.reduce((a, p) => a + p.tokens, 0);
+    const center = cnum(s.context), sub = pct == null ? '上下文' : pct + '%';
+    const ring = parts.length
+      ? donut(parts.map(p => ({ v: p.tokens, c: p.color })), center, sub, 76)
+      : donut([{ v: s.context, c: '#3b82f6' }, { v: Math.max((s.window || s.context) - s.context, 0), c: 'var(--bd)' }], center, sub, 76);
+    const ringTip = parts.length
+      ? '当前上下文构成（最近一次请求）\n' + parts.map(p => `${p.label} ${cnum(p.tokens)} · ${partSum ? Math.round(p.tokens / partSum * 1000) / 10 : 0}%`).join('\n')
+      : '无构成数据（无 model-io 记录或超出预解析范围）\n环显示上下文窗口占用';
+    const cur = s.id === currentId;
+    return `<button class="sCard${cur ? ' cur' : ''}${s.id === state.sessionId ? ' on' : ''}" data-sid="${esc(s.id)}" aria-label="查看会话：${esc(s.title)}"><div class="sHead"><span class="sTitle">${esc(s.title || '无标题会话')}</span>${cur ? '<span class="curBadge">当前</span>' : ''}<span class="sTimes"><span class="sTime">${agoTs(s.updated)}</span><span class="sCreated">${dateKey(s.created)}</span></span></div><div class="sCrumb"><span class="sPill" data-tip="${esc(s.directory)}">${esc(groupLabel(groupKeyOf(s)))}</span>${s.parent_id ? '<span class="sPill">子代理</span>' : ''}${s.archived ? '<span class="sPill">已归档</span>' : ''}<span class="sPill">${esc(s.model || '未知模型')}</span></div><div class="sBody"><div class="sRing" data-tip="${esc(ringTip)}">${ring}</div><div class="sStats"><div class="sStat"><span class="k">轮次</span><span class="v">${s.turns} 轮 ${s.steps} 步</span></div><div class="sStat"><span class="k">Token 总用量</span><span class="v">${cnum(s.tokens)}</span></div><div class="sStat"><span class="k">上下文窗口</span><span class="v">${cnum(s.window)}</span></div></div></div><div class="sPreview"><span class="k">最新消息</span><span class="v" data-tip="${esc(s.last_msg || '')}">${esc(s.last_msg || '暂无文本消息')}</span><span class="cardArrow" aria-hidden="true">↗</span></div></button>`;
+  }).join('') + pager || '<div class="empty">当前筛选没有匹配会话。可清除筛选或扩大时间范围。</div>');
 }
 
 let trendValues = [];

@@ -7,7 +7,7 @@ function persistViews() {
   if(!persistentReady) return;
   saveContextView();
   const global={tab:state.tab,sessionId:state.sessionId,sessionTitle:state.sessionTitle,range:state.range,
-    search:state.search,group:state.group,archive:state.archive,day:state.day,sortKey:state.sortKey,
+    search:state.search,group:state.group,archive:state.archive,day:state.day,sortKey:state.sortKey,sessPage:state.sessPage,
     detailDays:detailState.days,detailTab:detailState.tab,healthDays:healthState.days,
     pins:pendingInsightPins || capturePins(['insTokensBody','insTimingBody'])};
   const entries=[['global',global],...(state.sessionId?[[`session:${state.sessionId}`,contextViews.get(state.sessionId)]]:[])];
@@ -35,6 +35,7 @@ async function restorePersistentViews() {
       state.range=['today','7d','30d'].includes(g.range)?g.range:'7d';
       for(const key of ['search','group','archive','day'])state[key]=text(g[key]);
       state.sortKey=['updated','tokens','context'].includes(g.sortKey)?g.sortKey:'updated';
+      state.sessPage=Math.min(999,Math.max(1,Math.floor(Number(g.sessPage))||1));state.sessPageFor=state.sessionId;
       detailState.days=[1,7,30].includes(g.detailDays)?g.detailDays:7;detailState.tab=g.detailTab==='mcp'?'mcp':'model';healthState.days=[1,7,30].includes(g.healthDays)?g.healthDays:7;
       if(state.sessionId)restoreContextView(state.sessionId);
       document.getElementById('browserSearch').value=state.browserQuery;

@@ -134,7 +134,7 @@ function syncSelect(select) {
   const focusedValue = ui.list.contains(document.activeElement) ? document.activeElement.dataset.value : null;
   ui.list.replaceChildren(...visible.map(o => {
     const button = document.createElement('button'); button.type = 'button'; button.role = 'option';
-    button.textContent = o.textContent; button.dataset.value = o.value;
+    button.textContent = o.textContent; button.dataset.value = o.value; button.title = o.textContent;
     button.setAttribute('aria-selected', String(o.selected));
     button.className = o.selected ? 'picked' : ''; return button;
   }));
@@ -275,6 +275,15 @@ function bootInteractions() {
     const cat = e.target.closest('[data-pick-cat]'); if (cat) { pickCategory(cat.dataset.pickCat); return; }
     const agent = e.target.closest('[data-agent]');
     if (agent) { state.agentPick = state.agentPick === agent.dataset.agent ? null : agent.dataset.agent; highlightAgent(); renderAgentInspector(); return; }
+    const pg = e.target.closest('[data-pg]');
+    if (pg && !pg.disabled) {
+      const pages = Number(pg.closest('.pager')?.dataset.pages) || 1, v = pg.dataset.pg;
+      const next = v === 'prev' ? state.sessPage - 1 : v === 'next' ? state.sessPage + 1 : Number(v);
+      state.sessPage = Math.min(Math.max(1, Number.isFinite(next) ? next : 1), pages);
+      renderSessions();
+      const grid = document.getElementById('insSessions'); if (grid) { grid.scrollTop = 0; reveal(grid); }
+      return;
+    }
     const session = e.target.closest('[data-sid]'); if (session) { selectSession(session.dataset.sid); return; }
     const group = e.target.closest('[data-group]'); if (group) { state.group = group.dataset.group; renderSessions(); return; }
     const date = e.target.closest('[data-day]'); if (date) { state.day = state.day === date.dataset.day ? null : date.dataset.day; renderSessions(); renderDaily(state.insights); renderHeatmap(state.insights); reveal(document.getElementById('insSessions')); }
@@ -287,10 +296,11 @@ function bootInteractions() {
   });
   document.getElementById('sessArchive').addEventListener('change', e => { state.archive = e.target.value; renderSessions(); });
   document.getElementById('clearSessionFilters').addEventListener('click', () => {
-    state.day = null; state.group = ''; state.search = ''; state.archive = '';
+    state.day = null; state.group = ''; state.search = ''; state.archive = ''; state.pick = null;
     document.getElementById('sessSearch').value = ''; document.getElementById('sessArchive').value = ''; syncSelect(document.getElementById('sessArchive'));
-    renderSessions(); renderDaily(state.insights); renderHeatmap(state.insights);
+    markPickRows(); renderSessions(); renderDaily(state.insights); renderHeatmap(state.insights);
   });
+  document.getElementById('pickChip').addEventListener('click', () => clearPick());
   document.getElementById('browserSearch').addEventListener('input', e => { state.browserQuery = e.target.value.trim().toLowerCase(); renderBrowser(); });
   document.getElementById('browserClear').addEventListener('click', () => { state.browserQuery = ''; document.getElementById('browserSearch').value = ''; renderBrowser(); document.getElementById('browserSearch').focus(); });
   document.getElementById('browserSnapshot').addEventListener('click', e => {

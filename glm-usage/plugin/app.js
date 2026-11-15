@@ -260,7 +260,8 @@ var state = {
   sessions: [], sortKey: "updated", search: "", group: "",
   sessionId: null, ctx: null, browser: null, dna: "tree", trendMode: "total",
   fleet: null, trendSel: -1, lastActivity: 0, silent: false,
-  expanded: new Set(), catPick: null, browserQuery: "", snapshot: "live", archive: "", day: null, trendKey: null, inspectorId: null
+  expanded: new Set(), catPick: null, browserQuery: "", snapshot: "live", archive: "", day: null, trendKey: null, inspectorId: null, heatMode: "tokens", pick: null,
+  sessPage: 1, sessPageFor: null
 };
 function callTool(name, args) {
   return window.__bridgeCall("tools/call", { name: name, arguments: args || {} }).then(function (r) {
@@ -329,6 +330,7 @@ document.getElementById("tabs").addEventListener("click", function (ev) {
 });
 function switchTab(tab) {
   if (window.hideTip) hideTip();
+  var topright = document.querySelector(".topright"); if (topright) topright.hidden = false; /* 视图恢复前隐藏启动控件，恢复后随首次 switchTab 显示 */
   const changed = state.tab !== tab;
   state.tab = tab;
   state.hoverCat = null; state.trendHover = null; state.agentHover = null;
@@ -347,7 +349,7 @@ function switchTab(tab) {
 document.getElementById("rangeBar").addEventListener("click", function (ev) {
   var b = ev.target.closest("button[data-r]");
   if (!b) return;
-  state.range = b.dataset.r; state.day = null;
+  state.range = b.dataset.r; state.day = null; state.pick = null;
   document.querySelectorAll("#rangeBar button").forEach(function (x) { x.classList.toggle("on", x === b); });
   loadInsights();
 });
@@ -357,6 +359,58 @@ document.getElementById("sessSort").addEventListener("click", function (ev) {
   state.sortKey = b.dataset.k;
   document.querySelectorAll("#sessSort button").forEach(function (x) { x.classList.toggle("on", x === b); });
   renderSessions();
+});
+document.getElementById("insHeatMetric").addEventListener("click", function (ev) {
+  var b = ev.target.closest("button[data-m]");
+  if (!b) return;
+  state.heatMode = b.dataset.m;
+  document.querySelectorAll("#insHeatMetric button").forEach(function (x) { x.classList.toggle("on", x === b); });
+  renderHeatmap(state.insights);
+});
+/* 排行行筛选联动（对齐 dsh：单击行 → 筛选下方会话列表，再次单击取消；双击 → 明细弹窗）
+   渲染纪律：行高亮只 toggle class、chip 直接更新，列表只在拿到会话集后重排一次，避免二次跳动 */
+var pickTimer = null;
+function markPickRows() {
+  document.querySelectorAll("#insSkillsList .barRow, #insToolsList .barRow, #insCmdsList .barRow").forEach(function (row) {
+    var on = !!state.pick && row.dataset.activity === state.pick.kind && row.dataset.pick === state.pick.name;
+    row.classList.toggle("on", on);
+    row.setAttribute("aria-pressed", String(on));
+  });
+}
+function updatePickChip() {
+  var chip = document.getElementById("pickChip");
+  if (!chip) return;
+  chip.hidden = !state.pick;
+  if (state.pick) chip.textContent = ({ tools: "工具 ", commands: "命令 ", skills: "技能 " }[state.pick.kind] || "") + state.pick.name + (state.pick.sessions == null ? " …" : " ×");
+}
+function clearPick() { state.pick = null; markPickRows(); updatePickChip(); renderSessions(); }
+function togglePick(kind, name) {
+  if (state.pick && state.pick.kind === kind && state.pick.name === name) { clearPick(); return; }
+  state.pick = { kind: kind, name: name, sessions: null };
+  markPickRows(); updatePickChip();
+  callTool("get_activity", { kind: kind, range: state.range, pick: name }).then(function (data) {
+    if (!state.pick || state.pick.kind !== kind || state.pick.name !== name) return;
+    state.pick.sessions = new Set((data || {}).session_ids || []);
+    renderSessions();
+  }).catch(function () {
+    if (state.pick && state.pick.kind === kind && state.pick.name === name) clearPick();
+  });
+}
+["insSkillsList", "insToolsList", "insCmdsList"].forEach(function (id) {
+  var box = document.getElementById(id);
+  box.addEventListener("click", function (ev) {
+    var row = ev.target && ev.target.closest ? ev.target.closest(".pickRow") : null;
+    if (!row) return;
+    clearTimeout(pickTimer);
+    var kind = row.dataset.activity, name = row.dataset.pick;
+    pickTimer = setTimeout(function () { togglePick(kind, name); }, 240);
+  });
+  box.addEventListener("dblclick", function (ev) {
+    var row = ev.target && ev.target.closest ? ev.target.closest(".pickRow") : null;
+    if (!row) return;
+    clearTimeout(pickTimer);
+    openActivity(row.dataset.activity, row.dataset.pick || "", false);
+  });
 });
 document.getElementById("sessSearch").addEventListener("input", function (ev) {
   state.search = ev.target.value.trim().toLowerCase();
@@ -404,40 +458,45 @@ function renderInsights() {
   }).join(""));
   document.getElementById("insCacheSub").textContent = "缓存读 " + cnum(k.cache_read) + " · 写 " + cnum(k.cache_write);
   renderDaily(d);
-  // Token 统计环形（四段：缓存读/写/新输入/输出）
-  document.getElementById("insCacheSub").textContent = "缓存读 " + cnum(k.cache_read) + " · 写 " + cnum(k.cache_write);
+  // Token 统计环形（缓存读/写 + 新输入，输出拆为思考/回复，对齐 dsh 分类口径）
   var tokSegs = [
     { n: "缓存读取", v: k.cache_read, c: "#22c55e" },
     { n: "缓存写入", v: k.cache_write, c: "#a855f7" },
     { n: "新输入", v: Math.max(k.input - k.cache_read - k.cache_write, 0), c: "#3b82f6" },
-    { n: "输出", v: k.output, c: "#f59e0b" },
+    { n: "模型思考", v: k.reasoning, c: "#ec4899" },
+    { n: "模型回复", v: Math.max(k.output - k.reasoning, 0), c: "#f59e0b" },
   ].filter(function (x) { return x.v > 0; });
   patchHTML("insTokensBody", donutLegendBlock(tokSegs, cnum(k.tokens), "总用量", 108));
-  document.getElementById("insTpsSub").textContent = "输出速度 " + k.tps + " tok/s";
+  document.getElementById("insTpsSub").textContent = "会话累计 · 输出速度 " + k.tps + " tok/s";
   var timSegs = [
-    { n: "首字等待 (TTFT)", v: k.ttft_ms, c: "#6366f1" },
-    { n: "模型生成", v: Math.max(k.model_ms - k.ttft_ms, 0), c: "#3b82f6" },
-    { n: "工具执行", v: k.tool_ms, c: "#14b8a6" },
+    { n: "模型等待", v: k.ttft_ms, c: "#6366f1", sub: cnum(k.ttft_n) + "次" },
+    { n: "模型生成", v: Math.max(k.model_ms - k.ttft_ms, 0), c: "#3b82f6", sub: cnum(k.steps) + "次" },
+    { n: "工具执行", v: k.tool_ms, c: "#14b8a6", sub: cnum(k.tool_calls) + "次" },
   ].filter(function (s) { return s.v > 0; });
   patchHTML("insTimingBody", donutLegendBlock(timSegs, durMs(k.active_ms), "活跃时长", 108, true));
   renderHeatmap(d);
-  // 文件活动
-  var files = d.files || [];
-  document.getElementById("insFilesSub").textContent = files.length + " 个文件";
-  patchHTML("insFilesList", files.slice(0, 12).map(function (f) {
-    var op = f.edits ? '<span class="op e">改×' + f.edits + "</span>" : f.writes ? '<span class="op w">写×' + f.writes + "</span>" : '<span class="op r">读×' + f.reads + "</span>";
-    return '<button class="fileRow" data-activity="files" data-pick="' + esc(f.full) + '">' + op + '<span class="fn" title="' + esc(f.full) + '">' + esc(f.file) + '</span><span class="ct">' + agoTs(f.last_at) + "</span></button>";
-  }).join("") || '<span class="empty" style="padding:18px 0">无文件活动</span>');
+  var TOOL_COLORS = ["#f59e0b","#22c55e","#3b82f6","#a855f7","#14b8a6","#6366f1"];
+  // 技能加载（对齐 dsh 技能卡）
+  var sks = d.skills || [];
+  document.getElementById("insSkillsSub").textContent = sks.reduce(function (a, x) { return a + x.calls; }, 0) + " 次加载";
+  var maxS = Math.max.apply(null, sks.map(function (x) { return x.calls; }).concat([1]));
+  patchHTML("insSkillsList", sks.map(function (x, i) {
+    return '<button class="barRow pickRow' + (state.pick && state.pick.kind === "skills" && state.pick.name === x.name ? " on" : "") + '" data-activity="skills" data-pick="' + esc(x.name) + '" title="最近 ' + agoTs(x.last_at) + ' · 单击筛选会话，双击明细">'
+      + '<span class="dot" style="background:' + TOOL_COLORS[i % 6] + '"></span>'
+      + '<span class="nm" title="' + esc(x.name) + '">' + esc(x.name) + "</span>"
+      + '<span class="ct">×' + x.calls + "</span>"
+      + '<span class="tr"><i style="width:' + (x.calls / maxS * 100).toFixed(1) + "%;background:" + TOOL_COLORS[i % 6] + '"></i></span></button>';
+  }).join("") || '<span class="empty" style="padding:18px 0">无技能加载记录</span>');
   // 工具
   var tls = d.tools || [];
   document.getElementById("insToolsSub").textContent = tls.length + " 个工具 · " + tls.reduce(function (a, x) { return a + x.calls; }, 0) + " 次调用";
   var maxT = Math.max.apply(null, tls.map(function (x) { return x.calls; }).concat([1]));
-  var TOOL_COLORS = ["#f59e0b","#22c55e","#3b82f6","#a855f7","#14b8a6","#6366f1"];
   patchHTML("insToolsList", tls.slice(0, 10).map(function (x, i) {
-    return '<button class="barRow" data-activity="tools" data-pick="' + esc(x.name) + '" title="耗时 ' + durMs(x.tool_ms) + (x.errors ? " · 失败 " + x.errors : "") + '">'
+    return '<button class="barRow pickRow' + (state.pick && state.pick.kind === "tools" && state.pick.name === x.name ? " on" : "") + '" data-activity="tools" data-pick="' + esc(x.name) + '" title="耗时 ' + durMs(x.tool_ms) + (x.errors ? " · 失败 " + x.errors : "") + ' · 单击筛选会话，双击明细">'
+      + '<span class="dot" style="background:' + TOOL_COLORS[i % 6] + '"></span>'
       + '<span class="nm">' + esc(x.name) + "</span>"
-      + '<span class="tr"><i style="width:' + (x.calls / maxT * 100).toFixed(1) + "%;background:" + TOOL_COLORS[i % 6] + '"></i></span>'
-      + '<span class="ct">×' + x.calls + "</span></button>";
+      + '<span class="ct">×' + x.calls + "</span>"
+      + '<span class="tr"><i style="width:' + (x.calls / maxT * 100).toFixed(1) + "%;background:" + TOOL_COLORS[i % 6] + '"></i></span></button>';
   }).join("") || '<span class="empty" style="padding:18px 0">无工具调用</span>');
   // 命令
   var cmds = d.commands || [];
@@ -445,9 +504,11 @@ function renderInsights() {
   var maxC = Math.max.apply(null, cmds.map(function (x) { return x.count; }).concat([1]));
   var CMD_COLORS = ["#e0aa14","#3ddc97","#e5735f","#8b5cf6","#3b82f6"];
   patchHTML("insCmdsList", cmds.slice(0, 10).map(function (x, i) {
-    return '<button class="barRow" data-activity="commands" data-pick="' + esc(x.program) + '"><span class="nm">' + esc(x.program) + "</span>"
-      + '<span class="tr"><i style="width:' + (x.count / maxC * 100).toFixed(1) + "%;background:" + CMD_COLORS[i % 5] + '"></i></span>'
-      + '<span class="ct">×' + x.count + "</span></button>";
+    return '<button class="barRow pickRow' + (state.pick && state.pick.kind === "commands" && state.pick.name === x.program ? " on" : "") + '" data-activity="commands" data-pick="' + esc(x.program) + '">'
+      + '<span class="dot" style="background:' + CMD_COLORS[i % 5] + '"></span>'
+      + '<span class="nm">' + esc(x.program) + "</span>"
+      + '<span class="ct">×' + x.count + "</span>"
+      + '<span class="tr"><i style="width:' + (x.count / maxC * 100).toFixed(1) + "%;background:" + CMD_COLORS[i % 5] + '"></i></span></button>';
   }).join("") || '<span class="empty" style="padding:18px 0">无命令记录</span>');
   document.getElementById("insSessCount").textContent = (d.sessions || []).length + " 个";
 }
@@ -571,22 +632,23 @@ function renderContext() {
     ["更新", s.updated ? new Date(s.updated).toLocaleString("zh-CN") : "—"],
     ["归档", s.archived ? "是" : "否"],
   ].map(function (r) { return '<div class="row"><span class="k">' + r[0] + '</span><span class="v" title="' + esc(r[1]) + '">' + esc(r[1]) + "</span></div>"; }).join(""));
-  // Token 统计环形
+  // Token 统计环形（输出拆为思考/回复，与洞察页同口径）
   var ts = s.token_sums || {};
   document.getElementById("ctxCacheSub").textContent = "缓存命中 " + (t.cache_hit || 0) + "%";
   var tSegs = [
     { n: "缓存读取", v: ts.cache_read, c: "#22c55e" },
     { n: "缓存写入", v: ts.cache_write, c: "#a855f7" },
     { n: "新输入", v: Math.max((ts.input || 0) - (ts.cache_read || 0) - (ts.cache_write || 0), 0), c: "#3b82f6" },
-    { n: "输出", v: ts.output, c: "#f59e0b" },
+    { n: "模型思考", v: ts.reasoning, c: "#ec4899" },
+    { n: "模型回复", v: Math.max((ts.output || 0) - (ts.reasoning || 0), 0), c: "#f59e0b" },
   ].filter(function (x) { return x.v > 0; });
   var tTotal = tSegs.reduce(function (a, x) { return a + x.v; }, 0) || 1;
   patchHTML("ctxTokensBody", donutLegendBlock(tSegs, cnum(tTotal), "Token 总量", 108));
-  document.getElementById("ctxTpsSub").textContent = "输出速度 " + (t.tps || 0) + " tok/s";
+  document.getElementById("ctxTpsSub").textContent = "会话累计 · 输出速度 " + (t.tps || 0) + " tok/s";
   var timSegs = [
-    { n: "首字等待 (TTFT)", v: t.ttft_ms, c: "#6366f1" },
-    { n: "模型生成", v: t.gen_ms, c: "#3b82f6" },
-    { n: "工具执行", v: t.tool_ms, c: "#14b8a6" },
+    { n: "模型等待", v: t.ttft_ms, c: "#6366f1", sub: cnum(ts.ttft_n) + "次" },
+    { n: "模型生成", v: t.gen_ms, c: "#3b82f6", sub: cnum(s.steps) + "次" },
+    { n: "工具执行", v: t.tool_ms, c: "#14b8a6", sub: cnum(t.tool_calls) + "次" },
   ].filter(function (x) { return x.v > 0; });
   patchHTML("ctxTimingBody", donutLegendBlock(timSegs, durMs(t.active_ms), "活跃时长", 108, true));
   restoreContextPins();
@@ -813,4 +875,12 @@ function refreshUsage() {
   usageRefresh = Promise.all([load(), loadDetail(), loadHealth()]).finally(() => { usageRefresh = null; });
   return usageRefresh;
 }
-window.addEventListener("bridge-ready", async function () { await restorePersistentViews(); schedule(); keyStatus(); switchTab(state.tab); });
+/* 启动防呆：bridge 迟迟未就绪时兜底显示默认用量页（正常路径在 switchTab 中纠正）；测试沙箱无 setTimeout，跳过 */
+var bootGuard = typeof setTimeout === "function" ? setTimeout(function () {
+  var page = document.getElementById("tab-usage");
+  if (page) page.hidden = false;
+  var tr = document.querySelector(".topright"); if (tr) tr.hidden = false;
+  var b = document.querySelector('#tabs button[data-tab="usage"]');
+  if (b && !document.querySelector("#tabs button.on")) b.classList.add("on");
+}, 2500) : null;
+window.addEventListener("bridge-ready", async function () { if (bootGuard) clearTimeout(bootGuard); await restorePersistentViews(); schedule(); keyStatus(); switchTab(state.tab); });

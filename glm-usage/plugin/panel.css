@@ -35,18 +35,18 @@
   .dot.bad { background:var(--bad); box-shadow:0 0 8px var(--bad); animation:none; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
   .topright { margin-left:auto; display:flex; align-items:center; gap:8px; font-size:12px; color:var(--sub); }
+  .topright[hidden] { display:none; }
   .countdown { font-family:var(--mono); font-variant-numeric:tabular-nums; min-width:70px; text-align:right; color:var(--dim); font-size:11.5px; }
   button { background:var(--card2); color:var(--sub); border:1px solid var(--bd); border-radius:8px; padding:4px 13px; cursor:pointer; font-size:12px; font-weight:500; transition:all 150ms ease; font-family:inherit; }
   button:hover { border-color:var(--bd2); color:var(--fg); }
   button.icon { padding:4px 9px; font-size:13px; line-height:1.4; }
   .themeBtn { width:32px; height:28px; padding:0; display:inline-flex; align-items:center; justify-content:center; border-radius:99px; }
   .themeBtn svg { display:block; transition:transform .55s var(--ease); }
-  .themeBtn .rays line { transition:opacity .3s ease, transform .45s var(--ease); transform-origin:12px 12px; }
-  .themeBtn .maskC { transition:cx .5s var(--ease), cy .5s var(--ease); }
-  [data-theme="dark"] .themeBtn .rays line { opacity:0; transform:rotate(-40deg) scale(.55); }
-  [data-theme="dark"] .themeBtn .maskC { cx:17.3px; cy:2.9px; }
-  [data-theme="light"] .themeBtn .rays line { opacity:1; transform:rotate(0deg) scale(1); }
-  [data-theme="light"] .themeBtn .maskC { cx:30px; cy:-2px; }
+  .themeBtn .icoSun, .themeBtn .icoMoon { transform-origin:12px 12px; transition:opacity .35s ease, transform .5s var(--ease); }
+  [data-theme="dark"] .themeBtn .icoSun { opacity:0; transform:rotate(120deg) scale(.4); }
+  [data-theme="dark"] .themeBtn .icoMoon { opacity:1; transform:rotate(0deg) scale(1); }
+  [data-theme="light"] .themeBtn .icoSun { opacity:1; transform:rotate(0deg) scale(1); }
+  [data-theme="light"] .themeBtn .icoMoon { opacity:0; transform:rotate(-120deg) scale(.4); }
   /* 切换/刷新过渡：内容淡入上移；图表元素从 0 增长 */
   .swapAnim { animation: swapIn .22s var(--ease); }
   @keyframes swapIn { from { transform:translateY(3px); } }
@@ -229,33 +229,36 @@
   .lgRow .p { color:var(--fg); font-weight:600; width:46px; text-align:right; }
   .ovMid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px; }
   .ovQuad { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; margin-bottom:12px; }
-  /* 条形列表 */
-  .barList { display:flex; flex-direction:column; gap:8px; }
-  .barRow { display:grid; grid-template-columns:104px 1fr auto; gap:8px; align-items:center; font-size:11.5px; font-family:var(--mono); font-variant-numeric:tabular-nums; }
-  .barRow .nm { color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .barRow .tr { height:4px; border-radius:var(--radius-full); background:color-mix(in srgb,var(--fg) 7%,transparent); overflow:hidden; }
-  .barRow .tr i { display:block; height:100%; border-radius:var(--radius-full); }
-  .barRow .ct { color:var(--dim); min-width:34px; text-align:right; }
-  /* 活跃度热力图 */
-  .heat { display:grid; grid-auto-flow:column; grid-template-rows:repeat(7,12px); gap:3px; width:max-content; }
-  .heat i { width:12px; height:12px; border-radius:3px; background:color-mix(in srgb,var(--fg) 6%,transparent); }
+  /* 条形列表（对齐 dsh tally：色点 + 完整名称 + ×次数，行底 2px 彩条） */
+  .barList { display:flex; flex-direction:column; gap:2px; max-height:216px; overflow-y:auto; }
+  .barRow { position:relative; display:flex; align-items:baseline; gap:7px; min-width:0; width:100%; border:0; background:transparent; border-radius:6px; padding:2px 6px 4px; font-size:12px; text-align:left; }
+  .barRow .dot { flex:none; width:7px; height:7px; border-radius:50%; align-self:center; box-shadow:none; background-clip:padding-box; }
+  .barRow .nm { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--mono); font-size:11px; color:var(--sub); }
+  .barRow .ct { flex:none; color:var(--sub); font-variant-numeric:tabular-nums; }
+  .barRow .tr { position:absolute; left:6px; right:6px; bottom:1px; height:2px; border-radius:1px; opacity:.45; pointer-events:none; }
+  .barRow .tr i { display:block; height:100%; border-radius:1px; }
+  /* 活跃度热力图（对齐 dsh：周日对齐周列 + 星期行标 + 跨月月份标签 + 会话/Token 双指标离散 5 级色阶） */
+  .heat { display:flex; gap:8px; width:max-content; margin:12px auto; }
+  .heat .hwds { display:flex; flex-direction:column; gap:3px; padding-top:16px; }
+  .heat .hwd { height:16px; display:flex; align-items:center; justify-content:center; font-size:9px; color:var(--dim); white-space:nowrap; }
+  .heat .hcols { display:flex; gap:3px; }
+  .heat .hcol { position:relative; display:flex; flex-direction:column; gap:3px; padding-top:16px; }
+  .hmon { position:absolute; top:0; left:0; font-size:9px; line-height:14px; color:var(--dim); white-space:nowrap; }
+  .hcell { width:16px; height:16px; border:0; border-radius:4px; padding:0; background:color-mix(in srgb,var(--fg) 7%,transparent); }
+  .hcell.future { background:transparent; }
+  .hcell.l1 { background:color-mix(in srgb,#3b82f6 28%,transparent); }
+  .hcell.l2 { background:color-mix(in srgb,#3b82f6 50%,transparent); }
+  .hcell.l3 { background:color-mix(in srgb,#3b82f6 72%,transparent); }
+  .hcell.l4 { background:color-mix(in srgb,#3b82f6 92%,transparent); }
   .heatScale { display:flex; align-items:center; gap:4px; font-size:10px; color:var(--faint); margin-top:8px; justify-content:flex-end; }
-  .heatScale i { width:11px; height:11px; border-radius:3px; }
-  /* 文件活动 */
-  .fileList { display:flex; flex-direction:column; gap:6px; max-height:216px; overflow-y:auto; }
-  .fileRow { display:flex; align-items:center; gap:8px; font-size:11.5px; font-family:var(--mono); }
-  .fileRow .op { flex:none; font-size:9.5px; padding:1px 6px; border-radius:var(--radius-full); border:1px solid var(--bd); color:var(--dim); }
-  .fileRow .op.r { color:#3b82f6; border-color:color-mix(in srgb,#3b82f6 35%,transparent); }
-  .fileRow .op.e { color:#f59e0b; border-color:color-mix(in srgb,#f59e0b 40%,transparent); }
-  .fileRow .op.w { color:#22c55e; border-color:color-mix(in srgb,#22c55e 35%,transparent); }
-  .fileRow .fn { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--sub); }
-  .fileRow .ct { color:var(--dim); }
-  /* 会话区（dsh：搜索 + 下拉 + 排序 chips + 分组 chips + 卡片网格） */
-  .sessBar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
-  .searchInput { flex:1 1 200px; min-width:140px; background:var(--bg); border:1px solid var(--bd); color:var(--fg); border-radius:8px; padding:4px 10px; font:12px var(--mono); outline:none; }
+  .heatScale .hcell { width:11px; height:11px; border-radius:3px; }
+  /* 会话区（对齐 dsh 单行列表头：标题 + 计数 + 筛选 chip + 搜索 + 下拉 + 排序，随后分组 chips 与卡片网格） */
+  .sessHead { row-gap:6px; }
+  .sessHead .searchInput { flex:1 1 220px; min-width:150px; max-width:520px; }
+  .searchInput { background:var(--bg); border:1px solid var(--bd); color:var(--fg); border-radius:8px; padding:4px 10px; font-size:12px; font-family:var(--mono); outline:none; }
   .searchInput:focus { border-color:var(--bd2); }
-  .sessBar select { background:var(--card2); border:1px solid var(--bd); color:var(--fg); border-radius:8px; padding:4px 8px; font:12px inherit; outline:none; max-width:220px; }
-  .groupChips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+  .sessHead select { background:var(--card2); border:1px solid var(--bd); color:var(--fg); border-radius:8px; padding:4px 8px; font-size:12px; font-family:inherit; outline:none; max-width:220px; cursor:pointer; }
+  .groupChips { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-start; margin-bottom:10px; }
   .gchip { font-size:11px; padding:2px 10px; border-radius:var(--radius-full); border:1px solid var(--bd); color:var(--sub); cursor:pointer; }
   .gchip.on { background:var(--fg); color:var(--bg); border-color:var(--fg); font-weight:600; }
   .gchip b { font-weight:700; }
@@ -410,7 +413,7 @@
   /* 无障碍：减少动态偏好下关闭全部动画（吸收自 v1.5.0） */
   @media (prefers-reduced-motion: reduce) {
     .enter, .bars > div, .item .ib > i, .metric .mv, .hSpeed path, .segArc, .dailyChart .col,
-    .meter > i, .stackBar i, .themeBtn svg, .themeBtn .rays line, .themeBtn .maskC, .abar i, .fleetCtx .bar i {
+    .meter > i, .stackBar i, .themeBtn svg, .themeBtn .icoSun, .themeBtn .icoMoon, .abar i, .fleetCtx .bar i {
       animation:none !important; transition:none !important;
     }
   }
@@ -450,10 +453,11 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible, summary:foc
 .kpi .kl { font-size:11px; font-weight:600; }
 .kpi .ks { font:10.5px/1.7 inherit; color:var(--dim); }
 .donutWrap { gap:10px; }
-.legendGrid { gap:5px 12px; grid-template-columns:repeat(2,minmax(0,1fr)); }
-.lgRow { border:0; background:transparent; text-align:left; padding:4px 5px; margin:0 -4px; line-height:1.25; border-radius:5px; }
+.legendGrid { position:relative; gap:5px 38px; grid-template-columns:repeat(2,minmax(0,1fr)); }
+.legendGrid::after { content:""; position:absolute; top:5px; bottom:5px; left:calc(50% - .5px); width:1px; background:var(--bd); }
+.lgRow { border:0; background:transparent; text-align:left; padding:4px 5px; margin:0 -4px; line-height:1.25; border-radius:5px; grid-template-columns:10px minmax(0,auto) auto 1fr; }
 .lgRow .n { color:var(--fg); font-weight:600; }
-.lgRow .v { grid-column:2 / 4; font:11px/1.3 inherit; color:var(--dim); }
+.lgRow .v { grid-column:auto; font:11px/1.3 var(--mono); color:var(--dim); text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .lgRow .p { width:auto; font-size:11.5px; }
 .lgRow:hover, .lgRow.highlighted { background:var(--card2); }
 .lgRow.dimmed { opacity:.5; }
@@ -461,27 +465,39 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible, summary:foc
 .segArc.dimmed { opacity:.25; }
 .segArc.highlighted { stroke-width:4.7; }
 .lc-donut-center b, .lc-donut-center span { max-width:80%; text-overflow:ellipsis; overflow:hidden; }
-.dailyChart { height:154px; display:flex; gap:8px; padding:8px 0 22px; }
+.dailyChart { height:154px; display:flex; gap:8px; padding:18px 0 22px; }
 .dailyAxis { display:flex; flex-direction:column; justify-content:space-between; align-items:flex-end; width:35px; flex:none; color:var(--dim); font:9px/1 var(--mono); }
+.dailyAxis.costAxis { width:42px; align-items:flex-start; text-align:left; }
 .dailyPlot { display:flex; flex:1; gap:5px; min-width:0; border-bottom:1px solid var(--bd2); background:repeating-linear-gradient(to top,var(--bd) 0 1px,transparent 1px 50%); }
 .dailyChart .col { background:transparent; border:0; padding:0 2px; border-radius:3px 3px 0 0; gap:0; transform:none; animation:none; }
-.dailyChart .col:hover, .dailyChart .col.selected { background:color-mix(in srgb,var(--acc) 13%,transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--acc) 55%,transparent); }
 .dailyChart .col i { width:100%; min-height:0; border-radius:1px; transition:height .32s var(--ease); }
+.dailyChart .col .pair { flex:1; min-height:0; display:flex; align-items:stretch; gap:2px; }
+/* 圆角只落在整柱外端（容器裁剪），三段内部直角对接：段再小也不出缺口 */
+.dailyChart .col .bar { flex:1; min-width:0; display:flex; flex-direction:column; justify-content:flex-end; border-radius:2.5px; overflow:hidden; }
+.dailyChart .col .bar i { border-radius:0; }
+.dailyChart .col .tv { position:absolute; top:-13px; left:-2px; right:-2px; text-align:center; font:9px/1 var(--mono); color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .dailyChart .lb { color:var(--dim); font:9px/1.2 var(--mono); width:max-content; white-space:nowrap; left:50%; right:auto; transform:translateX(-50%); }
 .chartLegend { flex-wrap:wrap; gap:4px 12px; font-size:10px; }
-.heat { grid-template-rows:repeat(7,15px); gap:3px; margin:12px auto; }
-.heat button { border:0; width:15px; height:15px; border-radius:3px; padding:0; }
-.heat button:hover, .heat button.selected { outline:2px solid var(--acc); outline-offset:1px; }
-.heatScale { margin-top:8px; }
-.fileRow, .barRow { padding:4px 5px; border-radius:5px; }
-.fileRow:hover, .barRow:hover { background:var(--card2); }
-.fileList { max-height:236px; }
+/* 会话分页（数字页码 + 省略号，比 dsh 前后页翻页更适合长列表管理） */
+.pager { display:flex; align-items:center; justify-content:center; gap:4px; margin-top:12px; flex-wrap:wrap; }
+.sessGrid .pager { grid-column:1 / -1; }
+.pgBtn { min-width:26px; height:26px; padding:0 7px; border:1px solid var(--bd); border-radius:7px; background:var(--card); color:var(--sub); font:11.5px/1 var(--mono); }
+.pgBtn:hover:not(:disabled) { background:var(--card2); color:var(--fg); }
+.pgBtn.on { background:var(--fg); border-color:var(--fg); color:var(--bg); font-weight:650; }
+.pgBtn:disabled { opacity:.35; }
+.pgGap { color:var(--faint); font:12px/1 var(--mono); }
+.pgInfo { margin-left:8px; color:var(--faint); font:10.5px/1 var(--mono); }
+.heat button.hcell:hover, .heat button.hcell.selected { outline:2px solid var(--acc); outline-offset:1px; }
+.heatCard .lc-title .chipbar { margin-left:auto; }
+/* 选中/悬浮对齐 dsh tally 行：仅底色过渡，不加描边（内描边会压在行底光带上）；选中反馈 = 底色 + 光带提亮 + 名称提亮 */
+.barRow { transition:background-color .18s ease; }
+.barRow:hover, .barRow.on { background:var(--card2); }
+.barRow.on .nm { color:var(--fg); }
+.barRow.on .tr { opacity:1; }
+.pickChip { flex:none; border:1px solid color-mix(in srgb,var(--acc) 45%,transparent); color:var(--acc); background:color-mix(in srgb,var(--acc) 10%,transparent); border-radius:999px; font-size:11px; line-height:1.4; font-family:inherit; padding:1px 10px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px; }
 .ovQuad { grid-template-columns:repeat(4,minmax(0,1fr)); }
-.barRow { grid-template-columns:minmax(60px,100px) 1fr auto; font-size:10.5px; }
-.fileRow { font-size:10.5px; }
 .textButton { border:0; background:transparent; color:var(--dim); padding:2px 6px; font-size:11px; }
 .textButton:hover { background:var(--card2); color:var(--fg); }
-#clearSessionFilters { margin-left:auto; }
 .sessGrid { grid-template-columns:repeat(3,minmax(0,1fr)); }
 .sCard { width:100%; color:var(--fg); min-width:0; border-radius:8px; padding:12px; transition:background .16s,border-color .16s,box-shadow .16s; }
 .sCard:hover, .sCard:focus-visible { background:var(--card2); border-color:var(--bd2); box-shadow:0 3px 12px #0000000a; }
@@ -492,14 +508,17 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible, summary:foc
 .gchip { background:transparent; }
 .gchip:hover:not(.on) { background:var(--card2); }
 .searchInput { font:12px/1.4 inherit; min-width:0; }
-.selectbox { position:relative; max-width:100%; min-width:0; }
-.selectTrigger { display:flex; align-items:center; gap:10px; width:100%; max-width:340px; padding:5px 10px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; text-align:left; font-size:11.5px; }
-.selectTrigger::after { content:"⌄"; margin-left:auto; flex:none; color:var(--dim); }
-.selectPopup { position:absolute; top:calc(100% + 5px); left:0; z-index:40; min-width:100%; width:max-content; max-width:min(420px,calc(100vw - 40px)); background:var(--card); border:1px solid var(--bd2); border-radius:9px; padding:5px; box-shadow:0 10px 35px #0003; }
-.selectPopup input { width:100%; border:1px solid var(--bd); border-radius:6px; background:var(--bg); color:var(--fg); font:12px inherit; padding:7px 9px; margin-bottom:4px; }
+.selectbox { position:relative; width:max-content; max-width:100%; min-width:0; }
+.selectTrigger { display:flex; align-items:center; gap:8px; width:max-content; max-width:100%; padding:5px 10px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; text-align:left; font-size:11.5px; }
+.selectTrigger::after { content:""; margin-left:auto; flex:none; width:7px; height:7px; border-right:1.6px solid var(--dim); border-bottom:1.6px solid var(--dim); transform:rotate(45deg) translate(-1px,-1px); }
+.selectPopup { position:absolute; top:calc(100% + 5px); left:0; z-index:40; min-width:100%; width:max-content; max-width:min(420px,calc(100vw - 40px)); background:var(--card); border:1px solid var(--bd2); border-radius:10px; padding:6px; box-shadow:0 10px 35px #0004; }
+.selectPopup input { width:100%; border:1px solid var(--bd); border-radius:7px; background:var(--bg); color:var(--fg); font:12px inherit; padding:7px 9px; margin-bottom:5px; }
 .selectOptions { max-height:280px; overflow-y:auto; }
-.selectOptions button { display:block; text-align:left; width:100%; border:0; background:transparent; padding:7px 10px; white-space:normal; border-radius:5px; font-size:12px; }
-.selectOptions button:hover, .selectOptions button:focus-visible, .selectOptions button.picked { background:var(--card2); color:var(--fg); }
+.selectOptions button { position:relative; display:flex; align-items:center; text-align:left; width:100%; border:0; background:transparent; padding:7px 12px 7px 27px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; border-radius:7px; font-size:12px; color:var(--sub); }
+.selectOptions button::before { content:""; position:absolute; left:10px; top:50%; width:7px; height:7px; margin-top:-3.5px; border-radius:99px; background:transparent; transition:background .15s ease; }
+.selectOptions button:hover, .selectOptions button:focus-visible { background:var(--card2); color:var(--fg); }
+.selectOptions button.picked { background:color-mix(in srgb,var(--acc) 14%,transparent); color:var(--fg); font-weight:600; }
+.selectOptions button.picked::before { background:var(--acc); }
 .selectEmpty { padding:12px; color:var(--dim); font-size:12px; }
 .ctxHead { min-height:32px; margin-bottom:14px; }
 .ctxHead > .selectbox { max-width:min(420px,100%); }
@@ -686,7 +705,6 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible, summary:foc
 }
 .kpiGrid { align-content:stretch; grid-template-rows:1fr 1fr; }
 button.barRow, button.fileRow { width:100%; text-align:left; border:0; background:transparent; }
-button.barRow:hover, button.fileRow:hover { background:var(--card2); }
 #ctxToolChips, #ctxCmdChips { cursor:pointer; border-radius:4px; padding:3px; margin:-3px; }
 #ctxToolChips:hover, #ctxCmdChips:hover { background:var(--card2); }
 .activityDialog { width:min(960px,calc(100vw - 32px)); height:min(740px,86vh); }
@@ -775,7 +793,6 @@ dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self
 /* Interaction parity: transient preview and persistent selection have distinct states. */
 .segArc { animation:donutReveal .4s var(--ease) both; animation-delay:calc(var(--i) * 35ms); }
 @keyframes donutReveal { from { opacity:0; stroke-width:2; } }
-.dailyChart .col.dayHot { background:color-mix(in srgb,var(--acc) 13%,transparent); box-shadow:inset 0 0 0 1px var(--acc); }
 .heat button.dayHot { outline:2px solid var(--acc); outline-offset:1px; }
 .lgRow, .heat button, .dailyChart .col { transition:opacity .18s,background-color .18s,box-shadow .18s; }
 .catDim .catDim { opacity:1; }
@@ -853,9 +870,9 @@ dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self
 .densePage .kpi { padding:8px 10px; text-align:left; }
 .densePage .kpi .kv { font-size:21px; line-height:1.3; }
 .densePage .kpi .ks { font-size:10.5px; line-height:1.5; }
-.densePage .dailyChart { height:144px; padding-top:4px; }
+.densePage .dailyChart { height:144px; padding-top:16px; }
 .densePage .dailyAxis { font-size:9.5px; }
-.densePage .dailyChart .col .lb { font-size:9.5px; }
+.densePage .dailyChart .col .tv, .densePage .dailyChart .col .lb { font-size:9.5px; }
 .densePage .chartLegend { margin-top:5px; gap:4px 10px; }
 .densePage :is(.ovMid,.ctxTop) > .card { min-height:0; }
 .densePage .donutWrap { gap:10px; }
@@ -871,7 +888,7 @@ dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self
 .densePage .sessGrid { gap:8px; grid-template-columns:repeat(3,minmax(0,1fr)); }
 .densePage .sCard { padding:9px 10px; gap:5px; }
 .densePage .sTitle { font-size:12px; }
-.densePage :is(.sessBar,.groupChips) { margin-bottom:8px; gap:6px; }
+.densePage :is(.groupChips) { margin-bottom:8px; gap:6px; }
 .densePage .ctxTop { grid-template-columns:minmax(0,2.5fr) minmax(0,1fr); }
 .densePage .csCell { padding:6px 8px; }
 .densePage .csCell .v { font-size:17px; }
@@ -922,3 +939,12 @@ dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self
 }
 
 #fleetNodes { display:contents; }
+
+/* 会话卡：当前会话徽标与选中态（对齐 dsh lc-ov-current / lc-ov-session-current） */
+.sCard.cur { border-color:color-mix(in srgb,var(--acc) 60%,transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--acc) 45%,transparent); }
+.curBadge { flex:none; font-size:10px; line-height:1.4; padding:1px 6px; border-radius:4px; border:1px solid color-mix(in srgb,var(--acc) 55%,transparent); color:var(--acc); font-weight:600; white-space:nowrap; }
+.sRing { flex:none; }
+
+/* 排行卡标题图标（对齐 dsh TallyCard icon：单色描边、与标题行内居中） */
+.lc-title .t { display:inline-flex; align-items:center; gap:5px; }
+.lc-title .ticon { width:13px; height:13px; flex:none; display:block; opacity:.85; }
