@@ -438,8 +438,11 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible, summary:foc
 .tabs button { min-height:30px; border-radius:5px; }
 .tabs button:not(.on):hover { background:color-mix(in srgb,var(--fg) 7%,transparent); }
 .topright { gap:6px; }
-.refreshIcon { display:inline-block; font-size:16px; line-height:1; }
-.refreshing .refreshIcon { animation:spin 900ms linear infinite; }
+/* 刷新按钮：纯图标药丸（与主题按钮同几何），刷新中图标平滑旋转，悬停微转提示可点 */
+.refreshBtn { width:32px; height:28px; padding:0; display:inline-flex; align-items:center; justify-content:center; border-radius:99px; }
+.refreshBtn svg { display:block; transform-origin:50% 50%; transition:transform .5s var(--ease); }
+.refreshBtn:hover svg { transform:rotate(72deg) scale(1.06); }
+.refreshBtn.refreshing svg { animation:spin 900ms linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
 [aria-busy="true"] > .lc-title::after { content:""; width:10px;height:10px;border:1.5px solid var(--bd2);border-top-color:var(--acc);border-radius:50%;animation:spin 800ms linear infinite; }
 .tabpage[aria-busy="true"] { cursor:progress; }

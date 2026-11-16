@@ -1,25 +1,25 @@
 /* 模型价格：内置参考目录 + 多源同步归一 + 本地模型匹配推荐（纯逻辑，无 IO，便于测试）。
- * 价格统一口径：目录条目携带原币种（USD/CNY），应用/估价时换算为 CNY 每百万 tokens 的 [输入, 输出]，
- * 与 config.prices / costOf 的现行格式完全兼容。
+ * 价格统一口径：目录条目携带原币种（USD/CNY），应用/估价时换算为 CNY 每百万 tokens 的 [输入, 输出, 缓存读?, 缓存写?]，
+ * 与 config.prices / costOf 完全兼容（缓存两位可选，缺省时 costOf 按输入价估算该部分）。
  * 同步 ≠ 应用：sync 只刷新参考目录缓存（~/.glm-usage/pricing-cache.json），改写 config.prices 必须经用户显式应用。 */
 
 export const PRICES_BUILTIN = {
-  // GLM · bigmodel 国内站（CNY 牌价参考；Flash 按国际线牌价换算）
-  "glm-5.3": { in: 8, out: 28, cur: "CNY", vendor: "GLM", note: "bigmodel 国内站参考价" },
-  "glm-5.3-flash": { in: 1.1, out: 3.6, cur: "CNY", vendor: "GLM", note: "z.ai 国际线牌价换算" },
-  "glm-4.7": { in: 2.9, out: 12.6, cur: "CNY", vendor: "GLM", note: "z-ai 直连线换算" },
+  // GLM · bigmodel 国内站（CNY 牌价参考；cr=缓存命中价，缓存存储官方限时免费）
+  "glm-5.3": { in: 8, out: 28, cr: 2, cur: "CNY", vendor: "GLM", note: "bigmodel 国内站参考价 · 缓存命中价官方牌价" },
+  "glm-5.3-flash": { in: 0.8, out: 2.8, cr: 0.23, cur: "CNY", vendor: "GLM", note: "bigmodel 国内站参考价" },
+  "glm-4.7": { in: 2.9, out: 12.6, cr: 0.58, cur: "CNY", vendor: "GLM", note: "z-ai 直连线换算 · 缓存命中按国内线牌价比例折算" },
   "glm-4.5": { in: 2, out: 8, cur: "CNY", vendor: "GLM", note: "bigmodel 牌价" },
-  // DeepSeek · 官方（USD，官方文档峰值档；谷时约半价）
-  "deepseek-v4-pro": { in: 1.32, out: 3.96, cur: "USD", vendor: "DeepSeek", note: "官方峰值档" },
-  "deepseek-flash": { in: 0.3, out: 1.2, cur: "USD", vendor: "DeepSeek", note: "官方峰值档" },
-  // OpenAI · 官方（USD）
-  "gpt-5.2": { in: 1.75, out: 14, cur: "USD", vendor: "OpenAI" },
-  "gpt-5.1": { in: 1.25, out: 10, cur: "USD", vendor: "OpenAI" },
-  "gpt-5-mini": { in: 0.25, out: 2, cur: "USD", vendor: "OpenAI" },
-  // Anthropic · 官方（USD）
-  "claude-sonnet-4.6": { in: 3, out: 15, cur: "USD", vendor: "Anthropic" },
-  "claude-opus-4.6": { in: 5, out: 25, cur: "USD", vendor: "Anthropic" },
-  "claude-haiku-4.5": { in: 1, out: 5, cur: "USD", vendor: "Anthropic" },
+  // DeepSeek · 官方（USD，官方文档峰值档；谷时约半价；缓存命中官方为未命中一成）
+  "deepseek-v4-pro": { in: 1.32, out: 3.96, cr: 0.132, cur: "USD", vendor: "DeepSeek", note: "官方峰值档" },
+  "deepseek-flash": { in: 0.3, out: 1.2, cr: 0.03, cur: "USD", vendor: "DeepSeek", note: "官方峰值档" },
+  // OpenAI · 官方（USD；cached input 一成，无缓存写计费）
+  "gpt-5.2": { in: 1.75, out: 14, cr: 0.175, cur: "USD", vendor: "OpenAI" },
+  "gpt-5.1": { in: 1.25, out: 10, cr: 0.125, cur: "USD", vendor: "OpenAI" },
+  "gpt-5-mini": { in: 0.25, out: 2, cr: 0.025, cur: "USD", vendor: "OpenAI" },
+  // Anthropic · 官方（USD；缓存读一成、缓存写 1.25 倍）
+  "claude-sonnet-4.6": { in: 3, out: 15, cr: 0.3, cw: 3.75, cur: "USD", vendor: "Anthropic" },
+  "claude-opus-4.6": { in: 5, out: 25, cr: 0.5, cw: 6.25, cur: "USD", vendor: "Anthropic" },
+  "claude-haiku-4.5": { in: 1, out: 5, cr: 0.1, cw: 1.25, cur: "USD", vendor: "Anthropic" },
 };
 
 /* ---- 键归一化与家族识别 ---- */
@@ -74,10 +74,15 @@ const OFFICIAL_OR_PREFIXES = new Set(["openai", "anthropic", "google", "meta", "
 function putBest(map, key, rec, name) {
   const prev = map.get(key);
   if (!prev || rec.tier > prev.tier) map.set(key, { ...rec, name: name || key });
-  else if (rec.tier === prev.tier && !prev.name.includes("/")) map.get(key).name = name || prev.name; // 同级保留带厂商的展示名
+  else if (rec.tier === prev.tier) {
+    if (!prev.name.includes("/")) map.get(key).name = name || prev.name; // 同级保留带厂商的展示名
+    // 同级条目缺缓存价时用另一来源补齐（缓存价字段间互不覆盖）
+    if (prev.cr == null && rec.cr != null) { prev.cr = rec.cr; prev.cw = rec.cw; }
+    else if (prev.cr != null && rec.cr != null && prev.cw == null && rec.cw != null) prev.cw = rec.cw;
+  }
 }
 
-// LiteLLM model_prices_and_context_window.json：{ "zai/glm-5.3": { input_cost_per_token, output_cost_per_token, … } }
+// LiteLLM model_prices_and_context_window.json：{ "zai/glm-5.3": { input_cost_per_token, output_cost_per_token, cache_read_input_token_cost, … } }
 export function normalizeLitellm(raw) {
   const out = new Map();
   for (const [k, v] of Object.entries(raw || {})) {
@@ -90,11 +95,11 @@ export function normalizeLitellm(raw) {
     const bare = normKey(k);
     if (!bare) continue;
     const tier = slash > 0 && !OFFICIAL_LITELLM_PREFIXES.has(vendor) ? 1 : 2;
-    putBest(out, bare, { in: pm(i), out: pm(o), cur: "USD", vendor, tier }, k);
+    putBest(out, bare, { in: pm(i), out: pm(o), ...cacheOf(v.cache_read_input_token_cost, v.cache_creation_input_token_cost), cur: "USD", vendor, tier }, k);
   }
   return out;
 }
-// OpenRouter /api/v1/models：{ data: [{ id: "z-ai/glm-5.3", pricing: { prompt, completion, … } }] }
+// OpenRouter /api/v1/models：{ data: [{ id: "z-ai/glm-5.3", pricing: { prompt, completion, input_cache_read, … } }] }
 export function normalizeOpenRouter(raw) {
   const out = new Map();
   for (const m of (raw && raw.data) || []) {
@@ -108,11 +113,16 @@ export function normalizeOpenRouter(raw) {
     const bare = normKey(id);
     if (!bare) continue;
     const tier = slash > 0 && !OFFICIAL_OR_PREFIXES.has(vendor) ? 1 : 2;
-    putBest(out, bare, { in: pm(i), out: pm(o), cur: "USD", vendor, tier }, id);
+    putBest(out, bare, { in: pm(i), out: pm(o), ...cacheOf(m.pricing.input_cache_read, m.pricing.input_cache_write), cur: "USD", vendor, tier }, id);
   }
   return out;
 }
 const pm = (perToken) => Math.round(perToken * 1e6 * 1e6) / 1e6; // 每百万价（$），6 位小数内取整避免浮点尾差
+// 缓存价（原币种每百万）：恒定返回 { cr, cw }，字段缺失为 null（costOf 回退输入价）；字段为 0 表示缓存免费，保留
+function cacheOf(cr, cw) {
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) && n >= 0 ? pm(n) : null; };
+  return { cr: cr == null ? null : num(cr), cw: cw == null ? null : num(cw) };
+}
 function guessVendor(key) {
   const f = familyOf(tokenize(key));
   return { glm: "zai", openai: "openai", anthropic: "anthropic", deepseek: "deepseek", google: "google", qwen: "qwen", moonshot: "moonshot", xai: "xai", meta: "meta", mistral: "mistral" }[f] || "";
@@ -135,8 +145,8 @@ export function mergeCatalog(cacheSources) {
 }
 export function toCny(entry, usdCny) {
   const rate = entry.cur === "USD" ? (Number(usdCny) || 7.2) : 1;
-  const r4 = (n) => Math.round(n * rate * 1e4) / 1e4;
-  return [r4(entry.in), r4(entry.out)];
+  const r4 = (n) => n == null ? null : Math.round(n * rate * 1e4) / 1e4;
+  return [r4(entry.in), r4(entry.out), r4(entry.cr), r4(entry.cw)];
 }
 /* 给本地模型推荐目录条目（top n，按 置信 > 官方tier > 来源优先级 排序） */
 export function recommendFor(localModel, catalog, usdCny, n = 3) {
@@ -147,5 +157,16 @@ export function recommendFor(localModel, catalog, usdCny, n = 3) {
     .filter((r) => r.score >= 0.5)
     .sort((a, b) => b.score - a.score || b.tier - a.tier || (prio[b.source] || 0) - (prio[a.source] || 0))
     .slice(0, n)
-    .map((r) => ({ key: r.key, name: r.name || r.key, source: r.source, vendor: r.vendor || "", tier: r.tier, cur: r.cur, in: r.in, out: r.out, note: r.note || "", price_cny: toCny(r, usdCny), confidence: Math.round(r.score * 100) }));
+    .map((r) => ({ key: r.key, name: r.name || r.key, source: r.source, vendor: r.vendor || "", tier: r.tier, cur: r.cur, in: r.in, out: r.out, cr: r.cr ?? null, cw: r.cw ?? null, note: r.note || "", price_cny: toCny(r, usdCny), confidence: Math.round(r.score * 100) }));
+}
+/* 费用估算（¥）：prices = [输入, 输出, 缓存读?, 缓存写?]（¥/百万 tokens）。
+ * inputT 含缓存 token，先扣除缓存部分再分段计价；未配置缓存价时该部分按输入价估算（缺官方价时保守，宁高勿漏）。 */
+export function costFrom(prices, inputT, outputT, cacheReadT = 0, cacheWriteT = 0) {
+  if (!Array.isArray(prices) || prices.length < 2) return null;
+  const cr = Math.max(Number(cacheReadT) || 0, 0), cw = Math.max(Number(cacheWriteT) || 0, 0);
+  const plain = Math.max(Number(inputT || 0) - cr - cw, 0);
+  const total = plain * prices[0] + Number(outputT || 0) * prices[1]
+    + cr * (prices[2] != null ? prices[2] : prices[0])
+    + cw * (prices[3] != null ? prices[3] : prices[0]);
+  return Math.round((total / 1e6) * 10000) / 10000;
 }

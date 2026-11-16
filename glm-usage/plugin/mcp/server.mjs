@@ -22,7 +22,7 @@
 
 import { readViews, writeView } from './view-store.mjs';
 import * as history from './history.mjs';
-import { PRICES_BUILTIN, normalizeLitellm, normalizeOpenRouter, mergeCatalog, recommendFor, normKey } from './pricing.mjs';
+import { PRICES_BUILTIN, normalizeLitellm, normalizeOpenRouter, mergeCatalog, recommendFor, normKey, toCny, costFrom } from './pricing.mjs';
 import crypto from "node:crypto";
 import os from "node:os";
 import fs from "node:fs";
@@ -41,7 +41,7 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* 回退 CLI 
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PANEL_URI = "ui://glm-usage/panel.html";
-const VERSION = "2.8.4";
+const VERSION = "2.8.5";
 const APP_VERSION = "3.18.2";
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8791"; // 仅当用户自建网页版时提示用，不作为依赖
 
@@ -530,15 +530,13 @@ function priceFor(modelId) {
   return Array.isArray(hit) && hit.length >= 2 ? hit : null;
 }
 
-// 单次调用的费用（¥）：[输入价, 输出价] 元/百万 tokens；未配置价格返回 null（对齐上游"仅计价模型显示费用"）
-function costOf(modelId, inputT, outputT) {
-  const pr = priceFor(modelId);
-  if (!pr) return null;
-  return Math.round(((Number(inputT || 0) * pr[0] + Number(outputT || 0) * pr[1]) / 1e6) * 10000) / 10000;
+// 单次调用的费用（¥）：价格未配置返回 null（对齐上游"仅计价模型显示费用"）；四段计价见 pricing.mjs costFrom
+function costOf(modelId, inputT, outputT, cacheReadT = 0, cacheWriteT = 0) {
+  return costFrom(priceFor(modelId), inputT, outputT, cacheReadT, cacheWriteT);
 }
 
 /* ---------- 模型价格管理：内置目录 + 多源同步 + 本地模型匹配推荐 ----------
- * config.prices 保持 [输入, 输出]（¥/百万）现行格式，costOf 不变；
+ * config.prices = [输入, 输出, 缓存读?, 缓存写?]（¥/百万；缓存两位可选，缺省按输入价估算）；
  * config.price_meta 记录每条价格的来源/时间（source: manual|builtin|litellm|openrouter）；
  * 同步目录缓存到 pricing-cache.json，只作为推荐参考——改写 prices 必须用户显式应用。 */
 
@@ -601,8 +599,8 @@ function buildPricingView(args) {
       .filter(([key]) => key.includes(query) || String(key).toLowerCase().split(/[^a-z0-9]+/).some((t) => t.startsWith(query)))
       .sort((a, b) => (b[1].tier || 0) - (a[1].tier || 0) || a[0].localeCompare(b[0]))
       .slice(0, 30)
-      .map(([key, rec]) => ({ key, name: rec.name || key, source: rec.source, vendor: rec.vendor || "", tier: rec.tier, cur: rec.cur, in: rec.in, out: rec.out, note: rec.note || "",
-        price_cny: [rec.cur === "USD" ? Math.round(rec.in * usdCny * 1e4) / 1e4 : rec.in, rec.cur === "USD" ? Math.round(rec.out * usdCny * 1e4) / 1e4 : rec.out] }));
+      .map(([key, rec]) => ({ key, name: rec.name || key, source: rec.source, vendor: rec.vendor || "", tier: rec.tier, cur: rec.cur, in: rec.in, out: rec.out, cr: rec.cr ?? null, cw: rec.cw ?? null, note: rec.note || "",
+        price_cny: toCny(rec, usdCny) }));
   }
   return out;
 }
@@ -621,9 +619,11 @@ function setPrices(args) {
     if (!key) continue;
     if (key === "*") { if (pair == null) { delete cfg.prices["*"]; delete cfg.price_meta["*"]; removed++; } continue; }
     if (pair == null) { delete cfg.prices[key]; delete cfg.price_meta[key]; removed++; continue; }
-    if (!Array.isArray(pair) || pair.length !== 2 || !pair.every((v) => Number.isFinite(Number(v)) && Number(v) >= 0 && Number(v) <= 10000))
-      throw new Error(`价格需为 [输入, 输出]（¥/百万 tokens，0~10000）: ${rawKey}`);
-    cfg.prices[key] = [Number(pair[0]), Number(pair[1])];
+    // [输入, 输出] 必填；[缓存读, 缓存写] 可选（null 占位表示未配置，落盘时剔除）
+    const nums = Array.isArray(pair) ? pair.filter((v) => v != null).map(Number) : null;
+    if (!nums || nums.length < 2 || nums.length > 4 || !nums.every((v) => Number.isFinite(v) && v >= 0 && v <= 10000))
+      throw new Error(`价格需为 [输入, 输出, 缓存读?, 缓存写?]（¥/百万 tokens，0~10000）: ${rawKey}`);
+    cfg.prices[key] = nums.length > 2 ? nums : [nums[0], nums[1]];
     const meta = args?.meta?.[rawKey] || args?.meta?.[key];
     cfg.price_meta[key] = meta && typeof meta === "object" ? meta : { source: "manual", at: Date.now() };
     applied++;
@@ -1042,12 +1042,13 @@ function fetchInsights(range) {
   };
   // KPI 费用：仅当范围内每个用到的模型都配置了价格时才给出（部分计价会误导，对齐上游 priced-session 口径）
   {
-    const perModel = q(`SELECT mu.model_id, SUM(mu.input_tokens) input_t, SUM(mu.output_tokens) output_t
+    const perModel = q(`SELECT mu.model_id, SUM(mu.input_tokens) input_t, SUM(mu.output_tokens) output_t,
+        SUM(mu.cache_read_input_tokens) cache_read, SUM(mu.cache_creation_input_tokens) cache_write
       FROM model_usage mu WHERE ${rng} AND mu.query_source != 'session_title'
       GROUP BY mu.model_id`, params);
     let total = 0;
     const allPriced = perModel.length > 0 && perModel.every((r) => {
-      const c = costOf(r.model_id, r.input_t, r.output_t);
+      const c = costOf(r.model_id, r.input_t, r.output_t, r.cache_read, r.cache_write);
       if (c == null) return false;
       total += c;
       return true;
@@ -1069,10 +1070,11 @@ function fetchInsights(range) {
     // 逐日费用：仅累计配置了价格的模型，未计价模型不计入也不清零当日（对齐上游"仅含支持计价映射的模型"口径）
     const costMap = new Map();
     for (const r of q(`SELECT date(mu.started_at/1000,'unixepoch','localtime') day, mu.model_id model_id,
-        SUM(mu.input_tokens) input_t, SUM(mu.output_tokens) output_t
+        SUM(mu.input_tokens) input_t, SUM(mu.output_tokens) output_t,
+        SUM(mu.cache_read_input_tokens) cache_read, SUM(mu.cache_creation_input_tokens) cache_write
       FROM model_usage mu WHERE ${mRng} AND mu.query_source != 'session_title'
       GROUP BY day, mu.model_id`, mParams)) {
-      const c = costOf(r.model_id, r.input_t, r.output_t);
+      const c = costOf(r.model_id, r.input_t, r.output_t, r.cache_read, r.cache_write);
       if (c != null) costMap.set(r.day, (costMap.get(r.day) || 0) + c);
     }
     return rows.map((r) => ({ day: r.day, tokens: Number(r.tokens || 0), input_t: Number(r.input_t || 0), output_t: Number(r.output_t || 0), cache_read: Number(r.cache_read || 0), steps: Number(r.steps || 0), sessions: Number(r.sessions || 0), cost: Math.round((costMap.get(r.day) || 0) * 10000) / 10000 }));
@@ -1085,12 +1087,13 @@ function fetchInsights(range) {
   // ---- 按模型 ----
   const models = q(`SELECT mu.model_id,
       COUNT(*) steps, SUM(mu.input_tokens) input_t, SUM(mu.output_tokens) output_t,
-      SUM(mu.cache_read_input_tokens) cache_read, SUM(mu.computed_total_tokens) tokens,
+      SUM(mu.cache_read_input_tokens) cache_read, SUM(mu.cache_creation_input_tokens) cache_write,
+      SUM(mu.computed_total_tokens) tokens,
       SUM(mu.duration_ms) model_ms, SUM(mu.time_to_first_token_ms) ttft_ms
     FROM model_usage mu WHERE ${rng} AND mu.query_source != 'session_title'
     GROUP BY mu.model_id ORDER BY tokens DESC LIMIT 12`, params).map((r) => ({
       ...r, tokens: Number(r.tokens || 0),
-      cost: costOf(r.model_id, r.input_t, r.output_t),
+      cost: costOf(r.model_id, r.input_t, r.output_t, r.cache_read, r.cache_write),
     }));
 
   // ---- 按工具 ----
@@ -1331,7 +1334,7 @@ function fetchSessionContext(sessionId) {
       archived: s.time_archived != null, compacting: s.time_compacting != null,
       turns, steps: sum.steps, tokens: sum.tokens, timing, token_sums: sum,
       model: lastModelId, window: windowFor(lastModelId),
-      cost: costOf(lastModelId, sum.input, sum.output), last_msg: lastMsg,
+      cost: costOf(lastModelId, sum.input, sum.output, sum.cache_read, sum.cache_write), last_msg: lastMsg,
     },
     stats: {
       user_msgs: Number(userMsgs || 0), answers: Number(answers || 0), skills: Number(skills || 0),
@@ -1406,7 +1409,8 @@ function fetchFleet(sessionId) {
     const chunk = ids.slice(i, i + 400);
     const cph = chunk.map(() => "?").join(",");
     for (const r of q(`SELECT session_id, COUNT(*) steps, SUM(computed_total_tokens) tokens, SUM(duration_ms) model_ms,
-        SUM(input_tokens) input_t, SUM(output_tokens) output_t
+        SUM(input_tokens) input_t, SUM(output_tokens) output_t,
+        SUM(cache_read_input_tokens) cache_read, SUM(cache_creation_input_tokens) cache_write
       FROM model_usage WHERE session_id IN (${cph}) AND query_source != 'session_title' GROUP BY session_id`, chunk)) {
       aggById.set(r.session_id, r);
     }
@@ -1437,7 +1441,7 @@ function fetchFleet(sessionId) {
       steps: Number(agg.steps || 0), tokens: Number(agg.tokens || 0), model_ms: ms(agg.model_ms),
       context: Number(lastM.input_tokens || 0), window: windowFor(lastM.model_id),
       model: lastM.model_id ? normModel(lastM.model_id) : null,
-      cost: lastM.model_id ? costOf(lastM.model_id, agg.input_t, agg.output_t) : null,
+      cost: lastM.model_id ? costOf(lastM.model_id, agg.input_t, agg.output_t, agg.cache_read, agg.cache_write) : null,
       running: nowMs - Number(row.time_updated || 0) < 3 * 60000,
     };
   };
@@ -1685,8 +1689,8 @@ const TOOLS = [
   },
   {
     name: "set_refresh",
-    description: "Set the usage auto-refresh interval in seconds (3-600). Persisted in ~/.glm-usage/config.json.",
-    inputSchema: { type: "object", properties: { seconds: { type: "number", description: "Refresh interval in seconds (3-600)" } }, required: ["seconds"], additionalProperties: false },
+    description: "Set the usage auto-refresh interval in seconds (3-600), or 0 to pause auto-refresh (manual refresh stays available). Persisted in ~/.glm-usage/config.json.",
+    inputSchema: { type: "object", properties: { seconds: { type: "number", description: "Refresh interval in seconds (3-600), or 0 to pause" } }, required: ["seconds"], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   },
   {
@@ -1861,11 +1865,11 @@ async function handleToolCall(name, args) {
   }
   if (name === "set_refresh") {
     const n = Math.round(Number(args?.seconds));
-    if (!Number.isFinite(n) || n < 3 || n > 600) throw new Error("seconds 需在 3~600 之间");
+    if (!Number.isFinite(n) || (n !== 0 && (n < 3 || n > 600))) throw new Error("seconds 需为 0（暂停）或在 3~600 之间");
     const cfg = loadConfig();
     cfg.refresh_seconds = n;
     saveConfig(cfg);
-    return { content: [{ type: "text", text: `已设为每 ${n >= 60 ? (n / 60) + " 分钟" : n + " 秒"}刷新` }] };
+    return { content: [{ type: "text", text: n === 0 ? "已暂停自动刷新（手动刷新不受影响）" : `已设为每 ${n >= 60 ? (n / 60) + " 分钟" : n + " 秒"}刷新` }] };
   }
   if (name === "get_config") {
     const key = configuredApiKey();

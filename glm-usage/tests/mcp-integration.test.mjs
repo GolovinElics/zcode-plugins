@@ -80,6 +80,15 @@ test('real MCP transport: recent 600 steps, all-time totals, family, browser and
     assert(daySessions.session_ids.includes('sess_root'));
     assert.deepEqual(await client.call('get_day_sessions', { day: '2000-01-01' }), { day: '2000-01-01', session_ids: [] });
     await assert.rejects(client.call('get_day_sessions', { day: 'not-a-day' }), /YYYY-MM-DD/);
+    // 缓存价计入费用估算：cache_read 共 30250 tokens，按缓存价 2 计（旧口径按输入价 8 会得 2.1151）
+    await client.call('set_prices', { prices: { 'GLM-5': [8, 28, 2] } });
+    const insightsPriced = await client.call('get_insights', { range: '7d' });
+    assert.equal(insightsPriced.kpis.cost, 1.9336);
+    // 刷新频率：0 = 暂停（手动刷新不受影响），常规区间照常，越界拒绝
+    const setRefresh = (seconds) => client.request('tools/call', { name: 'set_refresh', arguments: { seconds } }).then(r => r.content[0].text);
+    assert.match(await setRefresh(0), /暂停自动刷新/);
+    assert.match(await setRefresh(45), /45 秒/);
+    await assert.rejects(() => setRefresh(1), /3~600/);
     const resource = await client.request('resources/read', { uri: 'ui://glm-usage/panel.html' });
     assert(!resource.contents[0].text.includes('@inline:'));
   } finally { client.close(); rmSync(root, { recursive: true, force: true }); }

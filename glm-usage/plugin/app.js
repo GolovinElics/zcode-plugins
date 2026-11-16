@@ -837,26 +837,36 @@ async function ensureFleet(silent) {
 
 function schedule(){
   if (timer) clearInterval(timer);
+  var el = document.getElementById("countdown");
+  if (!REFRESH) { timer = null; if (el) el.textContent = "刷新已暂停"; return; } // 停止刷新：仅保留手动刷新
   timer = setInterval(function(){
     tick--;
     var el = document.getElementById("countdown");
     if (el) el.textContent = state.tab === "usage" ? Math.max(tick,0) + " 秒后刷新" : "自动同步";
     if (tick <= 0) {
       tick = REFRESH;
-      if (state.tab === "usage" && !document.hidden) refreshUsage(); // 洞察/上下文/Agent 由 live 定时器按会话活跃度驱动
+      if (state.tab === "usage" && !document.hidden) markRefreshing(refreshUsage()); // 洞察/上下文/Agent 由 live 定时器按会话活跃度驱动
     }
   }, 1000);
 }
+/* 刷新按钮反馈：仅图标旋转（无文字变化）；手动/自动刷新统一走这里，最短旋转 600ms 保证动画可感知 */
+function markRefreshing(pr) {
+  var b = document.getElementById('refreshBtn');
+  if (!b) return Promise.resolve(pr);
+  b.classList.add('refreshing');
+  var min = typeof setTimeout === "function" ? new Promise(function (r) { setTimeout(r, 600); }) : Promise.resolve();
+  return Promise.all([Promise.resolve(pr).catch(function () {}), min]).then(function () { b.classList.remove('refreshing'); });
+}
 async function manualRefresh() {
   var button = document.getElementById('refreshBtn');
-  if (button.disabled) return;
-  button.disabled = true; button.classList.add('refreshing');
-  try {
+  if (button.classList.contains('refreshing')) return;
+  var work = (async function () {
     if (state.tab === 'usage') await refreshUsage();
     if (state.tab === 'insights') await loadInsights();
     if (state.tab === 'context') await loadContext();
     if (state.tab === 'agent') await ensureFleet();
-  } finally { button.disabled = false; button.classList.remove('refreshing'); }
+  })();
+  await markRefreshing(work);
 }
 applyTheme(document.documentElement.getAttribute("data-theme") || "dark");
 /* ---- 使用详情（官方数据；经 MCP 桥调 get_usage_detail。合并自 glm-usage-dashboard v1.6.3）---- */
@@ -1013,27 +1023,29 @@ async function keyStatus() {
     var j = JSON.parse(r.content[0].text);
     document.getElementById("keystatus").textContent =
       j.has_key ? "已配置 " + j.masked + "（优先使用）" : "未配置（用 ZCode 内嵌浏览器登录态兜底）";
-    if (j.refresh_seconds) {
+    if (j.refresh_seconds != null) {
       REFRESH = j.refresh_seconds; tick = REFRESH;
       var sel = document.getElementById("refreshsel");
       if (sel) { sel.value = String(j.refresh_seconds); syncSelect(sel); }
-      var sl = document.getElementById("subline");
-      if (sl) sl.innerHTML = "每 " + (j.refresh_seconds >= 60 ? (j.refresh_seconds/60) + " 分钟" : j.refresh_seconds + " 秒") + "自动拉取 · 燃烧速率按最近 5 分钟～6 小时样本估算 · <a href=\"https://bigmodel.cn/coding-plan/personal/usage\" target=\"_blank\">官方用量页 ↗</a>";
+      renderSubline(j.refresh_seconds);
     }
     if (j.insights_available === false) {
       showErr("insErr", "未找到本地会话数据库（~/.zcode/cli/db/db.sqlite），上下文洞察不可用");
     }
   } catch (e) { document.getElementById("keystatus").textContent = "配置读取失败"; }
 }
+function renderSubline(n) {
+  var sl = document.getElementById("subline");
+  if (sl) sl.innerHTML = (n ? "每 " + (n >= 60 ? (n / 60) + " 分钟" : n + " 秒") + "自动拉取" : "自动拉取已暂停（手动刷新可用）") + " · 燃烧速率按最近 5 分钟～6 小时样本估算 · <a href=\"https://bigmodel.cn/coding-plan/personal/usage\" target=\"_blank\">官方用量页 ↗</a>";
+}
 async function saveRefresh(v) {
   try {
-    var r = await window.__bridgeCall("tools/call", { name: "set_refresh", arguments: { seconds: Number(v) } });
-    REFRESH = Number(v); tick = REFRESH;
-    if (timer) clearInterval(timer); schedule();
     var n = Number(v);
+    var r = await window.__bridgeCall("tools/call", { name: "set_refresh", arguments: { seconds: n } });
+    REFRESH = n; tick = n;
+    schedule();
     document.getElementById("keystatus").textContent = r.content[0].text;
-    var sl = document.getElementById("subline");
-    if (sl) sl.innerHTML = "每 " + (n >= 60 ? (n / 60) + " 分钟" : n + " 秒") + "自动拉取 · 燃烧速率按最近 5 分钟～6 小时样本估算 · <a href=\"https://bigmodel.cn/coding-plan/personal/usage\" target=\"_blank\">官方用量页 ↗</a>";
+    renderSubline(n);
   } catch (e) { document.getElementById("keystatus").textContent = "保存失败：" + e.message; }
 }
 async function saveKey(clear) {

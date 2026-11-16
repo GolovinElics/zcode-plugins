@@ -159,7 +159,7 @@ function enhanceSelect(select) {
   button.addEventListener('click', () => {
     const opening = pop.hidden; document.querySelectorAll('.selectPopup').forEach(el => { el.hidden = true; el.previousElementSibling?.setAttribute('aria-expanded', 'false'); });
     pop.hidden = !opening; button.setAttribute('aria-expanded', String(opening));
-    input.hidden = select.options.length < 8; input.value = ''; syncSelect(select);
+    input.hidden = select.options.length < 8 || select.classList.contains('topsel'); input.value = ''; syncSelect(select); // topsel 为固定频率选择器，不需要搜索
     if (opening) (input.hidden ? list.querySelector('[aria-selected="true"]') || list.firstElementChild : input)?.focus();
   });
   input.addEventListener('input', () => syncSelect(select));

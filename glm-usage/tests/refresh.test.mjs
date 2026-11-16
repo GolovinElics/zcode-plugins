@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 function runtime() {
   const nodes=new Map(), timers=[];
-  const node=()=>({style:{},dataset:{},value:'',textContent:'',innerHTML:'',querySelector:()=>null,addEventListener(){},setAttribute(){},getAttribute(){return 'dark';},classList:{add(){},remove(){},toggle(){}}});
+  const node=()=>({style:{},dataset:{},value:'',textContent:'',innerHTML:'',querySelector:()=>null,addEventListener(){},setAttribute(){},getAttribute(){return 'dark';},classList:{add(){},remove(){},toggle(){},contains:()=>false}});
   const document={hidden:false,documentElement:node(),getElementById:id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);},querySelectorAll:()=>[]};
   const r=vm.createContext({document,window:{addEventListener(){}},setInterval:fn=>{timers.push(fn);return timers.length;},clearInterval(){},setBusy(){},console});
   vm.runInContext(readFileSync(new URL('../plugin/app.js',import.meta.url),'utf8'),r);
@@ -56,4 +56,22 @@ test('detail and health ignore outdated ranges and background renders do not req
   pending[1].resolve(response({label:'month'}));await latest;pending[0].resolve(response({label:'week'}));await old;
   const health=r.loadHealth();pending[2].resolve(response({label:'health'}));await health;
   assert.equal(r.detailState.data.label,'month');assert.deepEqual(renders,[['detail',false],['health',false]]);
+});
+test('paused auto refresh (refresh_seconds=0) registers no timer, keeps manual path working', async () => {
+  const { r, timers } = runtime(), calls = [];
+  r.refreshUsage = () => { calls.push('refresh'); return Promise.resolve(); };
+  r.REFRESH = 0; r.tick = 0; r.schedule();
+  assert.equal(timers.length, 0); // 不再注册倒计时定时器
+  assert.equal(r.document.getElementById('countdown').textContent, '刷新已暂停');
+  timers.at(-1)?.(); // 无定时器可触发
+  assert.deepEqual(calls, []);
+  await r.manualRefresh(); // 手动刷新仍可用（图标旋转包装不阻断）
+  assert.deepEqual(calls, ['refresh']);
+});
+test('renderSubline reflects paused auto pull', async () => {
+  const { r } = runtime();
+  r.renderSubline(0);
+  assert.match(r.document.getElementById('subline').innerHTML, /已暂停/);
+  r.renderSubline(45);
+  assert.match(r.document.getElementById('subline').innerHTML, /每 45 秒/);
 });
