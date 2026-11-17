@@ -53,6 +53,7 @@ function restoreHover(root) {
 }
 function showTip(anchor, label) {
   if (!anchor || !(label || anchor.dataset.tip)) return hideTip();
+  if (document.querySelector('.selectPopup:not([hidden])')) return hideTip(); // 下拉菜单展开期间禁止浮动提示框遮挡选项
   const tip = document.getElementById('hoverTip');
   if (tipAnchor !== anchor) tipAnchor?.removeAttribute('aria-describedby');
   tipAnchor = anchor; anchor.setAttribute('aria-describedby', 'hoverTip');
@@ -137,7 +138,7 @@ function syncSelect(select) {
   const focusedValue = ui.list.contains(document.activeElement) ? document.activeElement.dataset.value : null;
   ui.list.replaceChildren(...visible.map(o => {
     const button = document.createElement('button'); button.type = 'button'; button.role = 'option';
-    button.textContent = o.textContent; button.dataset.value = o.value; button.title = o.textContent;
+    button.textContent = o.textContent; button.dataset.value = o.value;
     button.setAttribute('aria-selected', String(o.selected));
     button.className = o.selected ? 'picked' : ''; return button;
   }));
@@ -159,6 +160,7 @@ function enhanceSelect(select) {
   button.addEventListener('click', () => {
     const opening = pop.hidden; document.querySelectorAll('.selectPopup').forEach(el => { el.hidden = true; el.previousElementSibling?.setAttribute('aria-expanded', 'false'); });
     pop.hidden = !opening; button.setAttribute('aria-expanded', String(opening));
+    if (opening) hideTip(); // 展开菜单时清掉已悬浮的提示框，避免压住选项
     input.hidden = select.options.length < 8 || select.classList.contains('topsel'); input.value = ''; syncSelect(select); // topsel 为固定频率选择器，不需要搜索
     if (opening) (input.hidden ? list.querySelector('[aria-selected="true"]') || list.firstElementChild : input)?.focus();
   });
