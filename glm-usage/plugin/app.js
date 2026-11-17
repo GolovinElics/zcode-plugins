@@ -388,12 +388,22 @@ async function load() {
       d.plans.forEach(function (p, pi) {
         var card = box.children[pi];
         if (!card) return;
+        /* 待生效判定：套餐期已开始（status=active）但权益 effective_at 未到且 balances 尚无用量桶 */
+        var nowSec = Math.floor(Date.now() / 1000);
+        var effs = (p.entitlements || []).map(function (e) { return e.effective_at; }).filter(function (t) { return typeof t === "number" && t; });
+        var bucketed = d.buckets.some(function (b) { return b.plan_id === p.plan_id; });
+        var pendingAt = (!bucketed && effs.length && Math.min.apply(null, effs) > nowSec) ? Math.min.apply(null, effs) : null;
         var st = card.querySelector(".badge");
-        st.className = "badge " + p.status;
-        st.textContent = p.status === "active" ? "生效中" : p.status === "expired" ? "已到期" : esc(p.status);
+        st.className = "badge " + (pendingAt ? "pending" : p.status);
+        st.textContent = pendingAt ? "待生效" : p.status === "active" ? "生效中" : p.status === "expired" ? "已到期" : esc(p.status);
         card.querySelector(".pname").textContent = p.name;
-        card.querySelector(".life").textContent = "有效期至 " + (p.ends_at ? new Date(p.ends_at * 1000).toLocaleString("zh-CN") : "长期") + " · 剩 " + until(p.ends_at);
-        var buckets = d.buckets.filter(function (b) { return b.plan_id === p.plan_id_raw; });
+        var entitlementText = (p.entitlements || []).map(function (e) {
+          return e.show_name + " " + fmtK(e.grant_units) + (e.unit_type === "token" || !e.unit_type ? " tokens" : " " + e.unit_type);
+        }).join(" · ");
+        card.querySelector(".life").textContent = pendingAt
+          ? entitlementText + " · " + new Date(pendingAt * 1000).toLocaleString("zh-CN") + " 起生效 · 有效期至 " + (p.ends_at ? new Date(p.ends_at * 1000).toLocaleString("zh-CN") : "长期") + " · 剩 " + until(p.ends_at)
+          : "有效期至 " + (p.ends_at ? new Date(p.ends_at * 1000).toLocaleString("zh-CN") : "长期") + " · 剩 " + until(p.ends_at);
+        var buckets = d.buckets.filter(function (b) { return b.plan_id === p.plan_id; });
         var pw = card.querySelector(".pwrap");
         if (pw.children.length !== buckets.length) pw.innerHTML = buckets.map(function (b) { return sectionHTML(b); }).join("");
         buckets.forEach(function (b, bi) {

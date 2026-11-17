@@ -41,7 +41,7 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* 回退 CLI 
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PANEL_URI = "ui://glm-usage/panel.html";
-const VERSION = "2.8.5";
+const VERSION = "2.8.6";
 const APP_VERSION = "3.18.2";
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8791"; // 仅当用户自建网页版时提示用，不作为依赖
 
@@ -214,12 +214,54 @@ async function fetchCodingPlan() {
   return { level: json.data?.level || "unknown", limits };
 }
 
+/* ZCode 按「提供方家族」分账号：~/.zcode/v2/config.json 里 provider.<builtin:xxx>.options.apiKey
+ * 是应用自身发起对应家族流量所用凭据（如 builtin:bigmodel-start-plan 的 JWT），而 zcodejwttoken
+ * 属于 oauth:active_provider 当前家族。billing/balance 的 plans/balances 只返回凭据所属账号的
+ * 记录（bigmodel 侧的 Start Plan 套餐在 zai 凭据下不可见），因此逐个凭据查询后按 id 合并。 */
+function loadProviderApiKeys() {
+  const out = [];
+  try {
+    const cfg = JSON.parse(fs.readFileSync(path.join(ZCODE_DIR, "v2/config.json"), "utf8"));
+    for (const [id, p] of Object.entries(cfg.provider || {})) {
+      const key = String(p?.options?.apiKey || "").trim();
+      if (!key || p?.enabled === false) continue;
+      out.push({ id, auth: /^Bearer\s/i.test(key) ? key : "Bearer " + key });
+    }
+  } catch { /* 配置缺失时仅用 zcodejwttoken */ }
+  return out;
+}
+
 async function fetchBalance() {
   const deviceMid = loadDeviceMid();
   const url = `https://zcode.z.ai/api/v1/zcode-plan/billing/balance?app_version=${APP_VERSION}&device_mid=${encodeURIComponent(deviceMid)}`;
-  const json = await httpsGetJson(url, { Authorization: "Bearer " + loadZcodeToken() });
-  if (json.code !== 0) throw new Error(`接口返回 code=${json.code} ${json.msg || ""}`);
-  return json.data || {};
+  const attempts = loadProviderApiKeys();
+  try {
+    attempts.push({ id: "oauth:active_provider", auth: "Bearer " + loadZcodeToken() });
+  } catch (e) {
+    if (!attempts.length) throw e; // 任何凭据都拿不到时按原语义抛错
+  }
+  const plans = [], balances = [], seen = new Set();
+  let serverTime = 0, lastError = null, okCount = 0;
+  for (const a of attempts) {
+    let json;
+    try {
+      json = await httpsGetJson(url, { Authorization: a.auth });
+    } catch (e) { lastError = e; continue; }
+    if (json.code !== 0) { lastError = new Error(`接口返回 code=${json.code} ${json.msg || ""}`); continue; }
+    okCount++;
+    const data = json.data || {};
+    if (typeof data.server_time === "number") serverTime = Math.max(serverTime, data.server_time);
+    for (const p of data.plans || []) {
+      const k = "p:" + (p.user_plan_id || p.plan_id || p.name);
+      if (!seen.has(k)) { seen.add(k); plans.push(p); }
+    }
+    for (const b of data.balances || []) {
+      const k = "b:" + b.plan_id + "/" + b.show_name;
+      if (!seen.has(k)) { seen.add(k); balances.push(b); }
+    }
+  }
+  if (!okCount && lastError) throw lastError;
+  return { server_time: serverTime || Math.floor(Date.now() / 1000), plans, balances };
 }
 
 /* ---------- 官方使用详情（token-usage/usage-detail） ----------
@@ -378,6 +420,15 @@ function normalizeBalance(data) {
     status: p.status === "active" && p.ends_at && p.ends_at <= nowSec ? "expired" : (p.status || "unknown"),
     starts_at: p.starts_at,
     ends_at: p.ends_at,
+    plan_id: p.plan_id,
+    /* 权益明细：额度生效时间（effective_at）可能晚于套餐本身（如 Start Plan 领取后待 23:00 发放） */
+    entitlements: (p.entitlements || []).map((e) => ({
+      show_name: e.show_name || e.entitlement_id || "",
+      grant_units: e.grant_units ?? 0,
+      effective_at: e.effective_at ?? null,
+      period: e.period || "",
+      unit_type: e.unit_type || "",
+    })),
   }));
   const buckets = (data.balances || []).map((b) => {
     const used = b.used_units || 0;
@@ -443,7 +494,6 @@ function historySeries() {
 async function buildUsagePayload() {
   const [bal, cp] = await Promise.allSettled([fetchBalance(), fetchCodingPlan()]);
   const out = bal.status === "fulfilled" ? normalizeBalance(bal.value) : { server_time: 0, fetched_at: Date.now(), plans: [], buckets: [] };
-  out.plans = out.plans.map((p, i) => ({ ...p, plan_id_raw: (bal.value?.plans || [])[i]?.plan_id }));
   out.coding_plan = cp.status === "fulfilled" ? cp.value : { error: cp.reason?.message || "获取失败" };
   out.balance_error = bal.status === "rejected" ? bal.reason?.message : undefined;
 
@@ -1750,7 +1800,11 @@ async function usageText() {
   } else if (cp) lines.push(`GLM Coding Plan: 获取失败（${cp.error}）`);
   for (const p of d.plans || []) {
     lines.push(`${p.name}（${p.status === "active" ? "生效中" : p.status}）`);
-    for (const b of (d.buckets || []).filter((x) => x.plan_id && d.plans.some((pl) => pl.plan_id_raw === x.plan_id && pl.name === p.name))) {
+    for (const e of p.entitlements || []) {
+      const effAt = typeof e.effective_at === "number" ? new Date(e.effective_at * 1000).toLocaleString("zh-CN") : null;
+      lines.push(`  权益 ${e.show_name}: ${e.grant_units.toLocaleString()} ${e.unit_type || "tokens"}` + (effAt ? `（${effAt} 起可用）` : ""));
+    }
+    for (const b of (d.buckets || []).filter((x) => x.plan_id && x.plan_id === p.plan_id)) {
       lines.push(`  ${b.show_name}: ${b.used.toLocaleString()}/${b.total.toLocaleString()}（${b.percent}%）`);
     }
   }

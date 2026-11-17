@@ -148,6 +148,7 @@
   .plan .life { font-size:11px; color:var(--faint); margin-bottom:10px; }
   .badge { font-size:10.5px; padding:1px 8px; border-radius:var(--radius-full); border:1px solid var(--bd); color:var(--dim); font-weight:500; }
   .badge.active { color:var(--ok); border-color:color-mix(in srgb,var(--ok) 40%,transparent); }
+  .badge.pending { color:var(--mid); border-color:color-mix(in srgb,var(--mid) 40%,transparent); }
   .badge.expired { color:var(--bad); border-color:color-mix(in srgb,var(--bad) 40%,transparent); }
   .footer { margin-top:20px; text-align:center; font-size:11px; color:var(--faint); }
 
