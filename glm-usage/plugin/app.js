@@ -1025,16 +1025,16 @@ document.getElementById("detailTab").addEventListener("click", function (e) {
   renderDetail(true);
 });
 
-/* ---- 系统健康度（官方理论速率 model-performance-day + 本地实际解码速率对比）---- */
+/* ---- 系统健康度（官方高峰期均速与本地解码速率）---- */
 var healthState = { days: 7, data: null }, healthTicket = 0;
 function speedChart(d) { return healthChart(d, { escape: esc, curve: monotonePath }); }
 function ensureHealthSkeleton(body) {
   if (body.dataset.built === "1" && body.querySelector('.healthSummary')) return;
   var mSkel = '<div class="metric"><div class="mk">' + skel("58px", "9px") + '</div><div class="mv">' + skel("64px", "14px") + "</div></div>";
   body.innerHTML = '<div class="healthSummary" id="healthSummary">' + mSkel + mSkel + mSkel + '</div>'
-    + '<div class="healthChartCaption">解码速度 <span>tokens/s</span> · 细线=官方理论 · 填充=本地实际</div>'
+    + '<div class="healthChartCaption"><span>解码速度</span><span>官方折线 · 本地填充</span></div>'
     + '<div id="hSpeed"><div class="skel skelBlock" style="height:148px;border-radius:4px"></div><div class="skel skelBlock" style="height:10px;width:42%;margin:9px auto 0"></div></div>'
-    + '<div class="healthFoot" id="healthFoot">' + skel("46%", "10px") + '</div>';
+    + '<div class="healthFoot" id="healthFoot" role="status">' + skel("46%", "10px") + '</div>';
   body.dataset.built = "1";
 }
 function renderHealth(animate = false) {
@@ -1042,16 +1042,37 @@ function renderHealth(animate = false) {
   if (!healthState.data) return;
   var d = healthState.data;
   ensureHealthSkeleton(body);
-  var last = Math.max(0, (d.xTime || []).length - 1);
-  patchHTML('healthSummary', [['Max / Pro', d.proMax?.[last], '#4082f5'], ['Lite', d.lite?.[last], '#ff8e42'], ['实际 · 本地', d.actual?.[last], '#10b981']].map(function (row) {
-    var value = row[1] != null && Number.isFinite(Number(row[1])) ? Number(row[1]).toFixed(1) : '—';
-    return '<div class="metric"><div class="mk"><i style="background:' + row[2] + '"></i>' + row[0] + '</div><div class="mv">' + value + ' <small>tok/s</small></div></div>';
+  const dates = d.xTime || [];
+  const actual = latestHealthSample(dates, d.actual, true);
+  const currentMax = latestHealthSample(dates, d.proMax);
+  const currentLite = latestHealthSample(dates, d.lite);
+  const max = currentMax || d.official_latest?.proMax;
+  const lite = currentLite || d.official_latest?.lite;
+  const n = actual ? d.actualN?.[actual.index] : null;
+  const rows = [
+    ['Max / Pro', max, '#4082f5', currentMax ? '官方' : '最近官方'],
+    ['Lite', lite, '#ff8e42', currentLite ? '官方' : '最近官方'],
+    ['实际 · 本地', actual, '#10b981', n ? n + ' 次' : '本机'],
+  ];
+  patchHTML('healthSummary', rows.map(([label, sample, color, source]) => {
+    const value = sample ? Number(sample.value).toFixed(1) + ' <small>tok/s</small>' :
+      '<span class="healthMissing">' + (label === '实际 · 本地' ? '无本地样本' : '无官方样本') + '</span>';
+    const detail = sample ? `<div class="healthSample" title="${esc(sample.date)}">${esc(source)} · ${esc(sample.date.slice(5,10))}</div>` : '';
+    return `<div class="metric"><div class="mk"><i style="background:${color}"></i>${label}</div><div class="mv">${value}</div>${detail}</div>`;
   }).join(''));
-  var nLast = (d.actualN || [])[last];
-  document.getElementById('healthFoot').textContent = (d.official === false ? '官方快照不可用 · 仅本地统计' : '官方每日快照' + (d.xTime?.length ? ' · 最新 ' + d.xTime[last] : ''))
-    + ' · 实际=输出÷解码时长' + (nLast ? '（最新 ' + nLast + ' 次）' : '');
+  const unavailable = {
+    login: '官方鉴权未通过。请检查 ZCode 内嵌浏览器的智谱登录态，或在插件设置中配置 Coding Plan Key。',
+    key: '官方鉴权未通过。请检查插件设置中的 Coding Plan Key。',
+    network: '官方性能接口连接失败。',
+    upstream: '官方性能接口暂时未返回有效数据。',
+    empty: (d.days === 1 ? '今天暂无官方测速快照。' : '所选日期暂无官方测速快照。'),
+  };
+  const foot = document.getElementById('healthFoot');
+  const note = unavailable[d.official_status] || (d.official === false ? '官方测速快照不可用。' : '官方数据为高峰期平均解码速度。');
+  const localNote = actual ? '本机速度按输出 Token 和解码时长计算。' : '';
+  if (foot.textContent !== note + localNote) foot.textContent = note + localNote;
   var speed = document.getElementById("hSpeed");
-  var sigS = d.xTime.join(",") + "|" + d.proMax.join(",") + "|" + d.lite.join(",") + "|" + (d.actual || []).join(",");
+  var sigS = JSON.stringify([dates, d.proMax, d.lite, d.actual, d.actualN]);
   if (speed.dataset.sig !== sigS) {
     speed.dataset.sig = sigS;
     patchHTML('hSpeed', speedChart(d));
@@ -1066,20 +1087,25 @@ function renderHealth(animate = false) {
 }
 async function loadHealth(animate = false) {
   var ticket = ++healthTicket, days = healthState.days;
-  ensureHealthSkeleton(document.getElementById("healthBody")); /* 等待期间先铺光带骨架，占住最终版式 */
+  const body = document.getElementById("healthBody");
+  if (healthState.data && healthState.data.days !== days) {
+    healthState.data = null;
+    delete body.dataset.built;
+  }
+  ensureHealthSkeleton(body);
+  body.setAttribute('aria-busy', 'true');
   try {
     var r = await window.__bridgeCall("tools/call", { name: "get_health", arguments: { days: days } });
     var j = JSON.parse(r.content[0].text);
     if (!j.ok) throw new Error(j.error || "未知错误");
     if (ticket !== healthTicket || days !== healthState.days) return;
-    healthState.data = j.data;
+    healthState.data = { ...j.data, days };
     renderHealth(animate);
   } catch (e) {
     if (ticket !== healthTicket) return;
-    var body = document.getElementById("healthBody");
     body.innerHTML = '<div class="err2">获取失败：' + esc(e.message) + "</div>";
     delete body.dataset.built;
-  }
+  } finally { if (ticket === healthTicket) body.setAttribute('aria-busy', 'false'); }
 }
 document.getElementById("healthDays").addEventListener("click", function (e) {
   var b = e.target.closest("button"); if (!b || b.classList.contains("on")) return;
@@ -1126,6 +1152,7 @@ async function saveKey(clear) {
     document.getElementById("keystatus").textContent = r.content[0].text;
     document.getElementById("keyinput").value = "";
     load();
+    loadHealth();
   } catch (e) { document.getElementById("keystatus").textContent = "保存失败：" + e.message; }
 }
 var usageRefresh = null;

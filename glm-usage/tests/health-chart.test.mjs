@@ -35,3 +35,10 @@ test('actual-only payload still renders when the official snapshot is unavailabl
   assert(html.includes('drawLine')); assert(html.includes('areaFill')); assert(!html.includes('NaN'));
   assert(html.includes('暂无健康度数据') === false);
 });
+test('the summary uses each series’ latest reported date and skips official zero placeholders', () => {
+  const dates = ['2026-11-17', '2026-11-18', '2026-11-19'];
+  assert.deepEqual(chart.latestHealthSample(dates, [120, '127.3', 0]), {value:127.3,date:dates[1],index:1});
+  assert.deepEqual(chart.latestHealthSample(dates, [89, null, ' ']), {value:89,date:dates[0],index:0});
+  assert.deepEqual(chart.latestHealthSample(dates, [65, 62, 0], true), {value:0,date:dates[2],index:2});
+  assert.equal(chart.latestHealthSample(dates, [null, false, 'bad']), null);
+});

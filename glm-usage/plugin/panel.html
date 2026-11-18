@@ -87,15 +87,15 @@
 
     <section class="card detail" id="healthCard">
       <div class="detailHead">
-        <h3>系统健康度</h3><span class="muted">点击日期查看本机会话</span>
+        <h3>系统健康度</h3>
         <div class="seg" id="healthDays">
           <button data-d="1">今天</button><button data-d="7" class="on">7 天</button><button data-d="30">30 天</button>
         </div>
       </div>
       <div id="healthBody" data-built="1"><!-- 与 app.js ensureHealthSkeleton 保持一致 --><div class="healthSummary" id="healthSummary"><div class="metric"><div class="mk"><span class="skel" style="width:58px;height:9px"></span></div><div class="mv"><span class="skel" style="width:64px;height:14px"></span></div></div><div class="metric"><div class="mk"><span class="skel" style="width:58px;height:9px"></span></div><div class="mv"><span class="skel" style="width:64px;height:14px"></span></div></div><div class="metric"><div class="mk"><span class="skel" style="width:58px;height:9px"></span></div><div class="mv"><span class="skel" style="width:64px;height:14px"></span></div></div></div>
-      <div class="healthChartCaption">解码速度 <span>tokens/s</span> · 细线=官方理论 · 填充=本地实际</div>
+      <div class="healthChartCaption"><span>解码速度</span><span>官方折线 · 本地填充</span></div>
       <div id="hSpeed"><div class="skel skelBlock" style="height:148px;border-radius:4px"></div><div class="skel skelBlock" style="height:10px;width:42%;margin:9px auto 0"></div></div>
-      <div class="healthFoot" id="healthFoot"><span class="skel" style="width:46%;height:10px"></span></div></div>
+      <div class="healthFoot" id="healthFoot" role="status"><span class="skel" style="width:46%;height:10px"></span></div></div>
     </section>
     </div>
     <div class="footer">GLM Usage Dashboard · /glm-usage 随时唤起</div>

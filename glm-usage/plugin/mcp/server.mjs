@@ -42,7 +42,7 @@ try { ({ DatabaseSync } = await import("node:sqlite")); } catch { /* 回退 CLI 
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PANEL_URI = "ui://glm-usage/panel.html";
-const VERSION = "2.9.0";
+const VERSION = "2.9.1";
 const APP_VERSION = "3.18.2";
 const DASHBOARD_ORIGIN = "http://127.0.0.1:8791"; // 仅当用户自建网页版时提示用，不作为依赖
 
@@ -174,14 +174,21 @@ function assertAllowedUrl(url) {
   if (blocked || !ALLOWED_HOSTS.has(h)) throw new Error(`主机不在白名单: ${h}`);
 }
 
-function httpsGetJson(url, headers) {
+function httpsGetJson(url, headers, { includeStatus = false } = {}) {
   assertAllowedUrl(url);
   return new Promise((resolve, reject) => {
     const req = https.request(url, { method: "GET", timeout: 15000, headers }, (res) => {
       let body = "";
       res.on("data", (c) => (body += c));
+      res.on("error", reject);
       res.on("end", () => {
-        try { resolve(JSON.parse(body)); } catch { reject(new Error("上游响应不是合法 JSON")); }
+        try {
+          const data = JSON.parse(body);
+          resolve(includeStatus ? { status: res.statusCode, data } : data);
+        } catch {
+          if (includeStatus) resolve({ status: res.statusCode, data: null });
+          else reject(new Error("上游响应不是合法 JSON"));
+        }
       });
     });
     req.on("timeout", () => req.destroy(new Error("上游请求超时")));
@@ -332,12 +339,12 @@ async function fetchUsageDetail(days = 7) {
 
 /* ---------- 官方系统健康度（model-performance-day）+ 本地实际解码速率 ---------- */
 
-let healthCache = { at: 0, days: 0, data: null };
+const healthCache = new Map();
 let actualRateMemo = { at: 0, fromMs: 0, map: null };
 
 // 按日聚合本地实际解码速率：输出 tokens ÷ 解码时长（duration−TTFT，与洞察 tps 同口径）。
 // 排除 session_title 后台生成；输出为 0 或时长≤TTFT 的行不计入分子分母，避免拉低/抬高均值。
-function actualRateMap(fromMs) {
+function actualRateMap(fromMs, untilMs) {
   if (actualRateMemo.map && actualRateMemo.fromMs === fromMs && Date.now() - actualRateMemo.at < 60 * 1000) {
     return actualRateMemo.map;
   }
@@ -348,8 +355,8 @@ function actualRateMap(fromMs) {
         SUM(CASE WHEN mu.duration_ms > mu.time_to_first_token_ms AND mu.output_tokens > 0 THEN mu.duration_ms - mu.time_to_first_token_ms ELSE 0 END) decode_ms,
         SUM(CASE WHEN mu.duration_ms > mu.time_to_first_token_ms AND mu.output_tokens > 0 THEN 1 ELSE 0 END) n
       FROM model_usage mu
-      WHERE mu.started_at >= ? AND mu.query_source != 'session_title'
-      GROUP BY day ORDER BY day`, [fromMs]);
+      WHERE mu.started_at >= ? AND mu.started_at < ? AND mu.query_source != 'session_title'
+      GROUP BY day ORDER BY day`, [fromMs, untilMs]);
     for (const r of rows) {
       const dec = Number(r.decode_ms || 0);
       map.set(r.day, { rate: dec > 0 ? Number(r.out_t || 0) / (dec / 1000) : null, n: Number(r.n || 0) });
@@ -370,45 +377,107 @@ function alignActualSeries(xTime, map) {
   return { actual, actualN };
 }
 
+function healthDateRange(days, today) {
+  const day = new Date(today);
+  day.setHours(0, 0, 0, 0);
+  const start = new Date(day);
+  start.setDate(start.getDate() + 1 - days);
+  const end = new Date(day);
+  end.setDate(end.getDate() + 1);
+  const dates = [];
+  for (const date = new Date(start); date < end; date.setDate(date.getDate() + 1)) dates.push(localDayStr(date));
+  return { dates, start: +start, end: +end };
+}
+
+function monitorSamples(data) {
+  const dates = Array.isArray(data.x_time) && data.x_time.length ? data.x_time : data.xTime;
+  const samples = new Map();
+  if (!Array.isArray(dates)) return samples;
+  const number = (series, i) => {
+    const value = Array.isArray(series) ? series[i] : null;
+    if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  };
+  dates.forEach((rawDate, i) => {
+    const date = String(rawDate).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    samples.set(date, {
+      proMax: number(data.proMaxDecodeSpeed, i) || null,
+      lite: number(data.liteDecodeSpeed, i) || null,
+      proMaxOk: number(data.proMaxSuccessRate, i),
+      liteOk: number(data.liteSuccessRate, i),
+    });
+  });
+  return samples;
+}
+
+async function requestOfficialHealth(dates, apiKey) {
+  let token;
+  try { token = apiKey || loadCodingPlanToken(); }
+  catch { return { status: "login", samples: new Map() }; }
+
+  const url = "https://open.bigmodel.cn/api/monitor/usage/model-performance-day?" +
+    new URLSearchParams({ startTime: dates[0] + " 00:00:00", endTime: dates.at(-1) + " 23:59:59" });
+  try {
+    const { status, data } = await httpsGetJson(url, { Authorization: token }, { includeStatus: true });
+    if (status === 401 || status === 403 || Number(data?.code) === 1001 ||
+        data?.success === false && /身份验证|鉴权|令牌|登录/.test(data.msg || "")) {
+      if (!apiKey) invalidateCodingPlanToken();
+      return { status: apiKey ? "key" : "login", samples: new Map() };
+    }
+    if (status >= 400 || data?.success !== true) return { status: "upstream", samples: new Map() };
+    return { status: "ok", samples: monitorSamples(data.data || {}) };
+  } catch {
+    return { status: "network", samples: new Map() };
+  }
+}
+
+async function officialHealth(days, dates) {
+  const day = dates.at(-1);
+  const apiKey = configuredApiKey();
+  const cached = healthCache.get(days);
+  if (cached?.day === day && cached.apiKey === apiKey) {
+    if (cached.pending) return cached.pending;
+    const ttl = cached.result.status === "ok" ? 5 * 60000 : 30000;
+    if (Date.now() - cached.at < ttl) return cached.result;
+  }
+  const entry = { day, apiKey };
+  entry.pending = requestOfficialHealth(dates, apiKey).then(result => {
+    entry.pending = null;
+    entry.at = Date.now();
+    entry.result = result;
+    return result;
+  });
+  healthCache.set(days, entry);
+  return entry.pending;
+}
+
 async function fetchHealth(days = 7) {
   days = [1, 7, 30].includes(days) ? days : 7;
-  const fromMs = Date.now() - days * 86400 * 1000;
-  const local = actualRateMap(fromMs);
-  let official = null;
-  if (healthCache.data && healthCache.days === days && Date.now() - healthCache.at < 5 * 60 * 1000) {
-    official = healthCache.data;
-  } else {
-    const apiKey = configuredApiKey();
-    const token = apiKey || loadCodingPlanToken();
-    const url = "https://open.bigmodel.cn/api/monitor/usage/model-performance-day?" +
-      new URLSearchParams({
-        startTime: fmtLocalDayHour(new Date(fromMs)),
-        endTime: fmtLocalDayHour(new Date()),
-      }).toString();
-    try {
-      const json = await httpsGetJson(url, { Authorization: token });
-      if (!json.success) throw new Error(json.msg || `health code=${json.code}`);
-      const d = json.data || {};
-      official = {
-        xTime: d.x_time || [],
-        lite: d.liteDecodeSpeed || [],
-        proMax: d.proMaxDecodeSpeed || [],
-        liteOk: d.liteSuccessRate || [],
-        proMaxOk: d.proMaxSuccessRate || [],
-      };
-      healthCache = { at: Date.now(), days, data: official };
-    } catch (e) {
-      // 官方快照不可用且本地无数据 → 维持原有报错行为；有本地数据则降级为仅实际速率
-      if (!local.size) throw e;
-    }
-  }
-  if (!official) {
-    const localDays = [...local.keys()].sort();
-    const { actual, actualN } = alignActualSeries(localDays, local);
-    return { xTime: localDays, lite: [], proMax: [], liteOk: [], proMaxOk: [], actual, actualN, official: false };
-  }
-  const { actual, actualN } = alignActualSeries(official.xTime, local);
-  return { ...official, actual, actualN, official: true };
+  const today = new Date();
+  const range = healthDateRange(days, today);
+  const local = actualRateMap(range.start, range.end);
+  // 每日快照可能次日才发布。今天的图仍只画当天，摘要可附最近一次官方快照及日期。
+  const officialDays = Math.max(7, days);
+  const officialDates = officialDays === days ? range.dates : healthDateRange(officialDays, today).dates;
+  const { status, samples } = await officialHealth(officialDays, officialDates);
+  const series = key => range.dates.map(date => samples.get(date)?.[key] ?? null);
+  const proMax = series("proMax"), lite = series("lite");
+  const official = proMax.some(v => v != null) || lite.some(v => v != null);
+  const recent = key => {
+    const date = officialDates.findLast(date => samples.get(date)?.[key] != null);
+    return date ? { date, value: samples.get(date)[key] } : null;
+  };
+  return {
+    days,
+    xTime: range.dates,
+    proMax, lite, proMaxOk: series("proMaxOk"), liteOk: series("liteOk"),
+    ...alignActualSeries(range.dates, local),
+    official,
+    official_status: status === "ok" && !official ? "empty" : status,
+    official_latest: { proMax: recent("proMax"), lite: recent("lite") },
+  };
 }
 
 /* ---------- 数据整理 ---------- */
@@ -1746,7 +1815,7 @@ const TOOLS = [
   },
   {
     name: "get_health",
-    description: "Fetch official system health daily snapshot (Max&Pro vs Lite decode speed and success rate) for the last N days (1/7/30). Returns JSON text.",
+    description: "Fetch system health by local calendar day (1/7/30), including official decode speed and local measured speed with sample status. Returns JSON text.",
     inputSchema: { type: "object", properties: { days: { type: "number", description: "1, 7 or 30" } }, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
@@ -2104,5 +2173,5 @@ async function dispatch(line) {
 /* ---------- 测试与基准辅助导出（不影响 MCP stdio 协议） ---------- */
 export const __internals = {
   readIoEntries, readLatestIoEntry, readTailIoEntries,
-  fetchInsights, fetchFleet, ensureActivityBuckets, activityTop, activityPickSessions, q, openDb,
+  fetchHealth, fetchInsights, fetchFleet, ensureActivityBuckets, activityTop, activityPickSessions, q, openDb,
 };

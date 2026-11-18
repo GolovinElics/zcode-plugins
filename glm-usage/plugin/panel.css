@@ -776,6 +776,8 @@ dialog .toast { position:sticky; bottom:0; left:auto; transform:none; align-self
 .healthSummary .mk { display:flex; align-items:center; gap:5px; margin-bottom:3px; }
 .healthSummary .mk i { width:7px; height:7px; border-radius:50%; flex:none; }
 .healthSummary small { color:var(--dim); font:10px inherit; font-weight:400; }
+.healthMissing { color:var(--dim); font-size:11px; font-weight:500; white-space:normal; }
+.healthSample { color:var(--dim); font-size:10px; margin-top:3px; }
 .healthChartCaption { display:flex; justify-content:space-between; color:var(--dim); font-size:10px; margin-bottom:8px; }
 .healthChart { display:grid; grid-template-columns:30px minmax(0,1fr); grid-template-rows:148px 22px; column-gap:6px; }
 .healthYAxis { grid-area:1/1; position:relative; color:var(--dim); font:9.5px/1 var(--mono); }

@@ -66,7 +66,18 @@ export async function fixtureCall(name, args = {}) {
     case 'get_usage_json': data = { coding_plan: { level: 'Max', limits: [{ id: 'cp:0', label: '5 小时窗口', total: 600, used: 216, remaining: 384, percent: 36, reset_at: Math.floor(now / 1000) + 7260 }, { id: 'cp:1', label: '每周额度', total: 6000, used: 2520, remaining: 3480, percent: 42, reset_at: Math.floor(now / 1000) + 158400 }] }, plans: [], buckets: [], rates: {}, history: {} }; break;
     case 'get_config': return { content: [{ type: 'text', text: JSON.stringify({ has_key: false, refresh_seconds: 30, insights_available: true, demo: true }) }] };
     case 'get_usage_detail': { const section = { summary: { total: 12460000, daily: 1780000, cacheHit: .9, peakRate: .3 }, totals: Array.from({length:24}, (_,i) => 15000 + i % 7 * 12000), periodTypes: Array.from({length:24}, (_,i) => i % 3 ? 'OFF_PEAK' : 'PEAK'), xTime: Array.from({length:24}, (_,i) => day(0) + ' ' + String(i).padStart(2,'0') + ':00'), items: [{name:'glm-5.3-flash',total:9800000},{name:'glm-5.3',total:2660000}], granularity:'HOUR' }; data = { days:7, model:section, mcp:section }; break; }
-    case 'get_health': data = { days: 7, xTime: Array.from({length:7}, (_,i) => day(6-i)), proMax:[112,126,119,134,140,133,144], lite:[74,82,76,88,94,86,98], actual:[61.5,58.2,49.8,64.1,70.3,55.6,67.4], actualN:[87,105,64,138,176,92,60], official:true }; break;
+    case 'get_health': {
+      const days = [1, 7, 30].includes(args.days) ? args.days : 7;
+      const scope = series => days === 1 ? series.slice(-1) : Array(days - 7).fill(null).concat(series);
+      data = {
+        days, xTime: Array.from({length:days}, (_,i) => day(days-1-i)),
+        proMax: scope([112,126,119,134,140,133,null]), lite: scope([74,82,76,88,94,86,null]),
+        actual: scope([61.5,58.2,49.8,64.1,70.3,55.6,67.4]), actualN: scope([87,105,64,138,176,92,60]),
+        official: days !== 1, official_status: days === 1 ? 'empty' : 'ok',
+        official_latest: {proMax:{value:133,date:day(1)}, lite:{value:86,date:day(1)}},
+      };
+      break;
+    }
     case 'get_pricing': {
       const rec = (key, i, o, source, tier, conf, name, note) => ({ key, name: name || key, source, vendor: '', tier, cur: source === 'builtin' ? 'CNY' : 'USD', in: i, out: o, note: note || '', confidence: conf, price_cny: [i, o] });
       data = {

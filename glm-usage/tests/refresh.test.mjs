@@ -76,6 +76,33 @@ test('renderSubline reflects paused auto pull', async () => {
   assert.match(r.document.getElementById('subline').innerHTML, /每 45 秒/);
 });
 
+test('the health card dates previous official readings and retains local readings during a network failure', () => {
+  const {r} = runtime();
+  vm.runInContext(readFileSync(new URL('../plugin/health-chart.js',import.meta.url),'utf8'),r);
+  const out = new Map();
+  r.patchHTML = (id, value) => out.set(id,value);
+  r.speedChart = () => 'chart';
+  r.requestAnimationFrame = () => {};
+  r.healthState.data = {
+    days:1, xTime:['2026-11-19'], proMax:[null], lite:[null], actual:[73], actualN:[8],
+    official:false, official_status:'empty',
+    official_latest:{ proMax:{value:128.4,date:'2026-11-18'}, lite:{value:102.6,date:'2026-11-18'} },
+  };
+  r.renderHealth();
+  assert.match(out.get('healthSummary'), /128\.4 .*?最近官方 · 11-18/);
+  assert.match(out.get('healthSummary'), /102\.6/);
+  assert.match(out.get('healthSummary'), /73\.0 .*?8 次 · 11-19/);
+  const foot = r.document.getElementById('healthFoot');
+  assert.match(foot.textContent, /今天暂无官方测速快照/);
+  r.healthState.data.official_latest = {};
+  r.healthState.data.official_status = 'network';
+  r.renderHealth();
+  assert.match(foot.textContent, /官方性能接口连接失败/);
+  assert.equal((out.get('healthSummary').match(/无官方样本/g) || []).length, 2);
+  assert.match(out.get('healthSummary'), /73\.0/);
+  assert.doesNotMatch(out.get('healthSummary'), /—.*?tok\/s/);
+});
+
 test('从已暂停配置冷启动只加载首屏，三个时钟周期内无自动请求', async()=>{
   const {r,timers,listeners}=runtime();
   const config=deferred();let loads=0;
