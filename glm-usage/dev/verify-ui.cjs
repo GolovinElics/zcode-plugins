@@ -16,7 +16,7 @@ async page => {
   await page.keyboard.press('Escape');
   check(await f.locator('#ctxTokensBody .segArc.dimmed').count() === 0, 'escape does not reset donut');
   await f.locator('#ctxTokensBody .lgRow').first().hover();
-  await f.locator('#ctxTokensBody .lc-donut-center').hover();
+  await f.locator('#ctxTokensBody .lc-donut-center').hover({ force: true }); /* 中心文本层 pointer-events:none，事件本就落在环上 */
   check(await f.locator('#ctxTokensBody .segArc.dimmed').count() === 0, 'donut remains dimmed over its center');
   results.push('donut hover, center reset, pin, Escape');
 
