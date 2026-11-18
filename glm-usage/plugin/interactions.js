@@ -20,7 +20,7 @@ function morphChildren(parent, source) {
       if (current.nodeType === 3) { if (current.data !== next.data) current.data = next.data; }
       else if (current.nodeType === 1) {
         for (const attr of [...current.attributes]) {
-          if (!next.hasAttribute(attr.name) && !['aria-describedby', 'data-hovered', 'data-pinned'].includes(attr.name)) current.removeAttribute(attr.name);
+          if (!next.hasAttribute(attr.name) && !['aria-describedby', 'data-hovered', 'data-pinned', 'open'].includes(attr.name)) current.removeAttribute(attr.name);
         }
         for (const attr of [...next.attributes]) if (current.getAttribute(attr.name) !== attr.value) current.setAttribute(attr.name, attr.value);
         morphChildren(current, next);
@@ -100,6 +100,7 @@ function selectSession(sid) {
     state.sessionTitle = state.sessions.find(s => s.id === sid)?.title || contextViews.get(sid)?.title || '';
     state.sessionId = sid; state.ctx = null; state.browser = null; state.fleet = null;
     restoreContextView(sid);
+    const card = document.getElementById('currentCard'); if (card?.style) card.style.minHeight = '';
     state.hoverCat = null; state.inspectorId = null; state.trendHover = null; state.agentHover = null;
     document.querySelectorAll('#tab-context [data-pinned]').forEach(el => { delete el.dataset.pinned; });
     requestTickets.context++; requestTickets.browser++; requestTickets.fleet++;
@@ -182,8 +183,10 @@ function enhanceSelect(select) {
 }
 
 let inspectorTicket = 0;
-async function inspectItem(id) {
-  const row = browserRows().find(r => r.it.id === id); if (!row) return;
+async function inspectItem(id, related = false) {
+  const dialogOpen = document.getElementById('itemDialog').open;
+  if (!dialogOpen) { state.inspectRows = filteredBrowserRows(); state.inspectAll = browserRows(); state.inspectSnapshot = state.browser?.snapshot_key; }
+  const row = (related ? state.inspectAll : state.inspectRows).find(r => r.it.id === id); if (!row) return;
   hideTip();
   const dialog = document.getElementById('itemDialog');
   const ticket = ++inspectorTicket, sid = state.sessionId, prev = state.snapshot === 'prev';
@@ -194,14 +197,29 @@ async function inspectItem(id) {
   document.getElementById('inspectorContent').textContent = row.it.preview;
   document.getElementById('inspectorNote').textContent = '正在读取条目内容…';
   document.getElementById('inspectorCopy').disabled = true;
-  const rows = browserRows(), index = rows.findIndex(r => r.it.id === id);
+  const rows = state.inspectRows, index = rows.findIndex(r => r.it.id === id);
+  document.getElementById('inspectorMeta').textContent += index >= 0 ? ' · 筛选结果 ' + (index + 1) + ' / ' + rows.length : ' · 当前请求中的关联条目';
+  const other = row.it.call_id ? state.inspectAll.filter(r => r.it.call_id === row.it.call_id && r.it.kind !== row.it.kind) : [];
+  const pair = document.getElementById('inspectorPair');
+  pair.hidden = other.length !== 1;
+  if (!pair.hidden) { pair.textContent = row.it.kind === 'tool_use' ? '查看工具结果' : '查看工具调用'; pair.onclick = () => inspectItem(other[0].it.id, true); }
+  document.getElementById('inspectorFormat').hidden = true;
   document.getElementById('inspectorPrev').disabled = index <= 0;
-  document.getElementById('inspectorNext').disabled = index >= rows.length - 1;
+  document.getElementById('inspectorNext').disabled = index < 0 || index >= rows.length - 1;
   if (!dialog.open) dialog.showModal();
   try {
-    const data = await callTool('get_context_item', { session_id: sid, item_id: id, prev });
+    const data = await callTool('get_context_item', { session_id: sid, item_id: id, prev, ...(state.inspectSnapshot ? {snapshot_key:state.inspectSnapshot} : {}) });
     if (ticket !== inspectorTicket || !dialog.open) return;
-    document.getElementById('inspectorContent').textContent = data.content;
+    const content = document.getElementById('inspectorContent');
+    content.textContent = data.content;
+    const format = document.getElementById('inspectorFormat');
+    if (!data.truncated && /^[\s]*[\[{]/.test(data.content)) {
+      try {
+        const formatted = JSON.stringify(JSON.parse(data.content), null, 2);
+        let pretty = false; format.hidden = false; format.textContent = '格式化 JSON';
+        format.onclick = () => { pretty = !pretty; content.textContent = pretty ? formatted : data.content; format.textContent = pretty ? '查看原文' : '格式化 JSON'; };
+      } catch { /* 非完整 JSON，保留原文 */ }
+    }
     document.getElementById('inspectorNote').textContent = data.truncated ? '内容较长，展示前 32,000 字符。' : 'Token 按字符权重估算，并用模型上报的输入总量校准。';
     document.getElementById('inspectorCopy').disabled = false;
   } catch (e) { if (ticket === inspectorTicket) document.getElementById('inspectorNote').textContent = e.message; }
@@ -275,14 +293,30 @@ function bootInteractions() {
       if (lastInput === 'keyboard') { const anchor = document.activeElement.closest?.('[data-tip]'); if (anchor) showTip(anchor); }
     });
   }, true); window.addEventListener('resize', hideTip);
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !e.target.closest('dialog[open]')) { hideTip(); state.trendHover = null; state.trendKey = null; updateTrendPick(); state.agentPick = null; state.agentHover = null; highlightAgent(); renderAgentInspector(); document.querySelectorAll('.donutWrap[data-pinned]').forEach(w => { delete w.dataset.pinned; highlightDonut(w); }); } });
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || e.target.closest('dialog[open]')) return;
+    hideTip();
+    if (state.tab === 'context') { state.trendHover = null; state.trendKey = null; updateTrendPick(); }
+    if (state.tab === 'agent' && state.fleet) { state.agentPick = null; state.agentHover = null; renderFleet(); }
+    document.querySelectorAll('#tab-' + state.tab + ' .donutWrap[data-pinned]').forEach(w => { delete w.dataset.pinned; highlightDonut(w); });
+  });
   document.addEventListener('click', e => {
+    const usageDay = e.target.closest('[data-insight-date]')?.dataset.insightDate;
+    if (usageDay && /^\d{4}-\d{2}-\d{2}$/.test(usageDay)) {
+      state.pick = null; state.day = usageDay; state.insightsAt = 0; switchTab('insights'); return;
+    }
+    const turn = e.target.closest('[data-turn-filter],[data-all-turns]');
+    if (turn) { state.turnFilter = turn.dataset.turnFilter || null; state.trendHover = null; state.trendKey = null; renderTrend(); renderEvents(); return; }
+    const eventType = e.target.closest('[data-event-type]');
+    if (eventType) { state.eventType = eventType.dataset.eventType; renderEvents(); return; }
+    if (e.target.closest('[data-step-browser]')) { document.getElementById('browserSearch').focus({preventScroll:true}); reveal(document.getElementById('browserPanel')); return; }
+    if (e.target.closest('[data-return-step]')) { const g = [...document.querySelectorAll('[data-step]')].find(g => g.dataset.step === state.trendKey); g?.focus(); reveal(g); return; }
     const slice = e.target.closest('[data-slice]');
     if (slice) { const wrap = slice.closest('.donutWrap'); if (wrap) { if (wrap.dataset.pinned === slice.dataset.slice) delete wrap.dataset.pinned; else wrap.dataset.pinned = slice.dataset.slice; highlightDonut(wrap); if (tipAnchor) showTip(tipAnchor); } }
     const item = e.target.closest('[data-item]'); if (item) { inspectItem(item.dataset.item); return; }
     const cat = e.target.closest('[data-pick-cat]'); if (cat) { pickCategory(cat.dataset.pickCat); return; }
     const agent = e.target.closest('[data-agent]');
-    if (agent) { state.agentPick = state.agentPick === agent.dataset.agent ? null : agent.dataset.agent; highlightAgent(); renderAgentInspector(); return; }
+    if (agent) { state.agentPick = state.agentPick === agent.dataset.agent ? null : agent.dataset.agent; renderFleet(); return; }
     const pg = e.target.closest('[data-pg]');
     if (pg && !pg.disabled) {
       const pages = Number(pg.closest('.pager')?.dataset.pages) || 1, v = pg.dataset.pg;
@@ -294,17 +328,19 @@ function bootInteractions() {
     }
     const session = e.target.closest('[data-sid]'); if (session) { selectSession(session.dataset.sid); return; }
     const group = e.target.closest('[data-group]'); if (group) { state.group = group.dataset.group; renderSessions(); return; }
-    const date = e.target.closest('[data-day]'); if (date) { state.day = state.day === date.dataset.day ? null : date.dataset.day; renderSessions(); renderDaily(state.insights); renderHeatmap(state.insights); reveal(document.getElementById('insSessions')); }
+    if (e.target.closest('[data-clear-day]')) { setInsightDay(null); return; }
+    if (e.target.closest('[data-show-sessions]')) { reveal(document.getElementById('insSessions')); return; }
+    const date = e.target.closest('[data-day]'); if (date) { setInsightDay(state.day === date.dataset.day ? null : date.dataset.day); }
     const kpi = e.target.closest('[data-kpi]'); if (kpi) {
       const index = Number(kpi.dataset.kpi);
-      if (index === 0) { state.group = ''; state.day = null; state.search = ''; state.archive = ''; document.getElementById('sessSearch').value = ''; document.getElementById('sessArchive').value = ''; syncSelect(document.getElementById('sessArchive')); renderSessions(); renderDaily(state.insights); renderHeatmap(state.insights); reveal(document.getElementById('insSessions')); }
+      if (index === 0) { state.group = ''; if (state.day) setInsightDay(null); state.search = ''; state.archive = ''; document.getElementById('sessSearch').value = ''; document.getElementById('sessArchive').value = ''; syncSelect(document.getElementById('sessArchive')); renderSessions(); renderDaily(state.insights); renderHeatmap(state.insights); reveal(document.getElementById('insSessions')); }
       else if (index === 2) { if (typeof openPricing === 'function') openPricing(); else toast('可在本地配置 prices 为不同 GLM 模型设置单价。套餐额度不等同于按量计费。'); }
       else reveal(document.getElementById(index === 4 ? 'insToolsList' : index === 5 ? 'insTimingBody' : 'insTokensBody'));
     }
   });
   document.getElementById('sessArchive').addEventListener('change', e => { state.archive = e.target.value; renderSessions(); });
   document.getElementById('clearSessionFilters').addEventListener('click', () => {
-    state.day = null; state.group = ''; state.search = ''; state.archive = ''; state.pick = null;
+    const hadDay = state.day; state.day = null; state.group = ''; state.search = ''; state.archive = ''; state.pick = null; if (hadDay) loadInsights();
     document.getElementById('sessSearch').value = ''; document.getElementById('sessArchive').value = ''; syncSelect(document.getElementById('sessArchive'));
     markPickRows(); renderSessions(); renderDaily(state.insights); renderHeatmap(state.insights);
   });
@@ -313,19 +349,54 @@ function bootInteractions() {
   document.getElementById('browserClear').addEventListener('click', () => { state.browserQuery = ''; document.getElementById('browserSearch').value = ''; renderBrowser(); document.getElementById('browserSearch').focus(); });
   document.getElementById('browserSnapshot').addEventListener('click', e => {
     const b = e.target.closest('[data-snapshot]'); if (!b || b.disabled) return;
-    state.snapshot = b.dataset.snapshot; state.browser = null; state.catPick = null; requestTickets.browser++; inFlight.browser = false;
+    state.trendHover = null; state.trendKey = null; state.manualKey = null; state.historyPage = null; state.historyList = false;
+    state.snapshot = b.dataset.snapshot; updateTrendPick(); clearBrowserContent('正在读取快照…'); state.browser = null; state.catPick = null; requestTickets.browser++; inFlight.browser = false;
     document.querySelectorAll('[data-snapshot]').forEach(el => { el.classList.toggle('on', el === b); el.setAttribute('aria-pressed', String(el === b)); });
     loadBrowser();
   });
+  document.getElementById('snapshotScope').onclick = async e => {
+    const data = state.historyData;
+    if (!data) return;
+    if (e.target.closest('[data-compare-snap]')) {
+      const ticket = requestTickets.browser;
+      try {
+        const result = await callTool('get_context_browser', {session_id:state.sessionId,snapshot_key:data.snapshot_key,compare:true});
+        if (ticket !== requestTickets.browser) return;
+        state.comparisonText = result.comparison ? '分类估算变化 · ' + result.comparison.categories.filter(c => c.delta).map(c => c.label + ' ' + (c.delta > 0 ? '+' : '') + fmt(c.delta)).join('　') : '没有更早的可读快照';
+        if (result.comparison && !result.comparison.categories.some(c => c.delta)) state.comparisonText = '各分类估算 Token 均无变化';
+        renderSnapshotScope(data);
+      } catch (e) { if (ticket === requestTickets.browser) toast(e.message); }
+      return;
+    }
+    if (e.target.closest('[data-list-snap]')) { state.historyList = !state.historyList; renderSnapshotScope(data); return; }
+    const step = activeStep(), key = e.target.closest('[data-snap-choice]')?.dataset.snapChoice;
+    if (key) {
+      if (step) {
+        chosenSnapshots.set(JSON.stringify([state.sessionId,step]), {key,match:'manual'});
+        if (chosenSnapshots.size > 120) chosenSnapshots.delete(chosenSnapshots.keys().next().value);
+      } else state.manualKey = key;
+      state.historyList = false; clearBrowserContent('正在读取快照…'); loadBrowser();
+    } else if (e.target.closest('[data-older-snap]') && data.before != null) {
+      if (step) chosenSnapshots.delete(JSON.stringify([state.sessionId,step]));
+      state.manualKey = null; state.historyPage = data.before; state.historyList = true; loadBrowser();
+    }
+  };
+  document.getElementById('ctxIoChips').onclick = e => {
+    const kind = e.target.closest('[data-content-kind]')?.dataset.contentKind;
+    if (!kind) return;
+    state.catPick = kind === 'answer' ? 'assistant' : 'user_messages';
+    state.contentKind = kind === 'answer' ? kind : null; state.expanded.add(state.catPick);
+    renderBrowser(); renderCurrent(); reveal(document.getElementById('browserPanel'));
+  };
   document.getElementById('ctxFleetN').role = 'button'; document.getElementById('ctxFleetN').tabIndex = 0;
   document.getElementById('ctxFleetN').onclick = () => switchTab('agent');
   document.getElementById('ctxFleetN').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchTab('agent'); } };
   const dialog = document.getElementById('itemDialog');
   document.getElementById('inspectorClose').onclick = () => dialog.close();
   dialog.addEventListener('click', e => { if (e.target === dialog) { const r = dialog.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dialog.close(); } });
-  dialog.addEventListener('close', () => { inspectorTicket++; hideTip(); });
+  dialog.addEventListener('close', () => { inspectorTicket++; hideTip(); followTrendSnapshot(); });
   for (const [name, delta] of [['Prev', -1], ['Next', 1]]) document.getElementById('inspector' + name).onclick = () => {
-    const rows = browserRows(), idx = rows.findIndex(r => r.it.id === state.inspectorId); if (rows[idx + delta]) inspectItem(rows[idx + delta].it.id);
+    const rows = state.inspectRows, idx = rows.findIndex(r => r.it.id === state.inspectorId); if (rows[idx + delta]) inspectItem(rows[idx + delta].it.id);
   };
   document.getElementById('inspectorCopy').onclick = async () => {
     try { await navigator.clipboard.writeText(document.getElementById('inspectorContent').textContent); toast('内容已复制'); }
@@ -398,6 +469,7 @@ function saveContextView() {
   if (contextViews.size > 12) contextViews.delete(contextViews.keys().next().value);
 }
 function restoreContextView(sid) {
+  state.historyPage = null; state.historyData = null; state.historyList = false; state.manualKey = null; state.contentKind = null; state.eventType = ''; state.turnFilter = null;
   const saved = contextViews.get(sid);
   Object.assign(state, { dna:'tree', trendMode:'total', snapshot:'live', catPick:null,
     browserQuery:'', trendKey:null, stripFocus:null, agentPick:null, dnaLimit:160,

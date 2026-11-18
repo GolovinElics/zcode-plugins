@@ -35,7 +35,7 @@ function healthChart(data, { escape, curve }) {
     const tip = `${date}，Max / Pro：${value(data.proMax?.[i])} tokens/s，Lite：${value(data.lite?.[i])} tokens/s，实际：${actualTip(actual[i], (data.actualN || [])[i])}`;
     // 交互为十字游标（见 interactions.js highlightHealth）：垂线贴点、顶不过最高交点、交点带数值；
     // 数值走游标层渲染，这里只保留 aria-label 说明，不再弹浮动 tooltip
-    return `<button class="healthPoint" data-health-index="${i}" style="left:${left}%;width:${right - left}%" aria-label="${escape(tip)}"></button>`;
+    return `<button class="healthPoint" data-health-index="${i}" data-insight-date="${escape(String(dates[i]).slice(0,10))}" style="left:${left}%;width:${right - left}%" aria-label="${escape(tip)}，查看当天本机会话"></button>`;
   }).join('');
   return `<div class="healthChart" data-max="${max}"><div class="healthYAxis">${ticks.map(t => `<span style="bottom:${t * 100}%">${Math.round(max * t)}</span>`).join('')}</div><div class="healthPlot"><svg class="hSpeed" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">${svg}</svg><div class="healthHits">${hits}</div><div class="healthCross" hidden><span class="hxDate"></span><i class="hxLine"></i><div class="hxDots"></div></div></div><div class="healthXAxis">${labels}</div></div>`;
 }

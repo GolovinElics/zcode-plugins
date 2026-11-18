@@ -20,12 +20,12 @@ export function categorizeEntry(entry, { contentId = null, itemCap = 400 } = {})
   const cats = Object.fromEntries(DEFINITIONS.map(([key, label, color]) => [key, { key, label, color, items: [], chars: 0 }]));
   let sequence = 0;
   let detail = null;
-  const add = (key, title, value, kind = 'text', images = 0) => {
+  const add = (key, title, value, kind = 'text', images = 0, callId = null) => {
     const text = textOf(value);
     if (Array.isArray(value)) images += value.filter(p => p && ['image', 'image_url'].includes(p.type)).length;
     const seq = sequence++;
     const id = `${key}-${seq}-${createHash('sha1').update(text).digest('hex').slice(0, 10)}`;
-    const item = { id, seq, title: String(title || key).slice(0, 120), kind, chars: text.length, images,
+    const item = { id, seq, call_id: typeof callId === "string" ? callId : null, title: String(title || key).slice(0, 120), kind, chars: text.length, images,
       preview: text.replace(/\s+/g, ' ').slice(0, 240) };
     cats[key].items.push(item);
     if (id === contentId) detail = { ...item, category: key, label: cats[key].label,
@@ -42,7 +42,7 @@ export function categorizeEntry(entry, { contentId = null, itemCap = 400 } = {})
       const key = isSkill(text) ? 'skill' : !cats.system_prompt.items.length ? 'system_prompt' : 'injected';
       add(key, head(text), text, key === 'system_prompt' ? 'system' : key);
     } else if (m.role === 'tool') {
-      add('tool_results', toolNames.get(m.tool_call_id) || m.name || '工具结果', content, 'tool_result');
+      add('tool_results', toolNames.get(m.tool_call_id) || m.name || '工具结果', content, 'tool_result', 0, m.tool_call_id);
     } else if (m.role === 'user' || m.role === 'assistant') {
       const key = m.role === 'user' ? 'user_messages' : 'assistant';
       if (m.reasoning_content) add('assistant', '思考块', m.reasoning_content, 'thinking');
@@ -55,15 +55,18 @@ export function categorizeEntry(entry, { contentId = null, itemCap = 400 } = {})
         else if (p.type === 'thinking') add('assistant', '思考块', p.thinking || '', 'thinking');
         else if (p.type === 'tool_use') {
           toolNames.set(p.id, p.name);
-          add('assistant', `调用 ${p.name}`, { name: p.name, input: p.input }, 'tool_use');
+          add('assistant', `调用 ${p.name}`, { name: p.name, input: p.input }, 'tool_use', 0, p.id);
         } else if (p.type === 'tool_result') {
-          add('tool_results', toolNames.get(p.tool_use_id) || '工具结果', p.content, 'tool_result');
-        } else if (p.type === 'image' || p.type === 'image_url') add(key, '图片附件', '[图片附件]', 'image', 1);
+          add('tool_results', toolNames.get(p.tool_use_id) || '工具结果', p.content, 'tool_result', 0, p.tool_use_id);
+        } else if (p.type === 'image' || p.type === 'image_url') {
+          const mime = p.source?.media_type || String(p.image_url?.url || '').match(/^data:(image\/[a-z0-9.+-]+);/i)?.[1];
+          add(key, '图片附件', mime ? '[图片附件 · ' + String(mime).slice(0, 80) + ']' : '[图片附件]', 'image', 1);
+        }
       }
       for (const call of m.tool_calls || []) {
         const fn = call.function || call;
         toolNames.set(call.id, fn.name);
-        add('assistant', `调用 ${fn.name || 'tool'}`, { name: fn.name, arguments: fn.arguments }, 'tool_use');
+        add('assistant', `调用 ${fn.name || 'tool'}`, { name: fn.name, arguments: fn.arguments }, 'tool_use', 0, call.id);
       }
     }
   }

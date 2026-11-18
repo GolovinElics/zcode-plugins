@@ -58,7 +58,7 @@ function renderDaily(d) {
     const h = n => (n / max * 100).toFixed(3);
     const hc = maxCost > 0 ? (cost / maxCost * 100).toFixed(3) : '0';
     const showLabel = count <= 7 || i % 5 === 0 || i === count - 1;
-    return `<span class="col" role="img" aria-label="${x.day}，Token ${fmt(x.tokens)}，缓存 ${cnum(cr)} · 输入 ${cnum(input)} · 输出 ${cnum(output)}${cost > 0 ? `，费用 ¥${cost.toFixed(2)}` : ''}" data-tip="${x.day} · Token ${fmt(x.tokens)}\n缓存 ${cnum(cr)} · 输入 ${cnum(input)} · 输出 ${cnum(output)}${cost > 0 ? `\n费用 ¥${cost.toFixed(2)}（仅计价模型）` : ''}"><span class="tv">${showLabel && x.tokens > 0 ? cnum(x.tokens) : ''}</span><span class="pair"><span class="bar"><i style="height:${h(output)}%;background:#f59e0b"></i><i style="height:${h(input)}%;background:#3b82f6"></i><i style="height:${h(cr)}%;background:#22c55e"></i></span><span class="bar cost"><i style="height:${hc}%;background:#06b6d4"></i></span></span><span class="lb">${count <= 7 || i % 5 === 0 || i === count - 1 ? x.day.slice(5) : ''}</span></span>`;
+    return `<button type="button" class="col" data-day="${x.day}" aria-pressed="${state.day === x.day}" aria-label="${x.day}，Token ${fmt(x.tokens)}，缓存 ${cnum(cr)} · 输入 ${cnum(input)} · 输出 ${cnum(output)}${cost > 0 ? `，费用 ¥${cost.toFixed(2)}` : ''}" data-tip="${x.day} · Token ${fmt(x.tokens)}\n缓存 ${cnum(cr)} · 输入 ${cnum(input)} · 输出 ${cnum(output)}${cost > 0 ? `\n费用 ¥${cost.toFixed(2)}（仅计价模型）` : ''}"><span class="tv">${showLabel && x.tokens > 0 ? cnum(x.tokens) : ''}</span><span class="pair"><span class="bar"><i style="height:${h(output)}%;background:#f59e0b"></i><i style="height:${h(input)}%;background:#3b82f6"></i><i style="height:${h(cr)}%;background:#22c55e"></i></span><span class="bar cost"><i style="height:${hc}%;background:#06b6d4"></i></span></span><span class="lb">${count <= 7 || i % 5 === 0 || i === count - 1 ? x.day.slice(5) : ''}</span></button>`;
   }).join('')}</div><div class="dailyAxis costAxis">${ticks.map(f => `<span>${yuanTick(f)}</span>`).join('')}</div>`);
 }
 function renderHeatmap(d) {
@@ -109,14 +109,14 @@ function renderSessions() {
   if (state.group && !all.some(s => groupKeyOf(s) === state.group)) state.group = '';
   /* 日筛选数据源：day 为空 → 不过滤；缓存命中 → 直接用；未命中 → dateKey 兜底先行渲染并异步取数修正（requestDaySessions） */
   let daySessions = null;
-  if (state.day) {
+  if (state.day && state.insights?.day !== state.day) {
     daySessions = daySessionsCache.get(state.day) || null;
     if (!daySessions) requestDaySessions(state.day);
   }
   let list = all.filter(s => (!state.group || groupKeyOf(s) === state.group) && (!state.archive || !s.archived)
     && (!state.search || `${s.title} ${s.directory} ${s.last_msg || ''} ${s.model || ''}`.toLowerCase().includes(state.search))
-    && (!state.day || (daySessions ? daySessions.has(s.id) : dateKey(s.updated) === state.day))
-    && (!state.pick || state.pick.sessions == null || state.pick.sessions.has(s.id)));
+    && (!state.day || state.insights?.day === state.day || (daySessions ? daySessions.has(s.id) : dateKey(s.updated) === state.day))
+    && (!state.pick || state.pick.sessions?.has(s.id)));
   list = list.slice().sort((a, b) => (b[state.sortKey] || 0) - (a[state.sortKey] || 0));
   // 当前会话在筛选结果内置顶并标注（对齐 dsh：全部或所在分组选中时排第一）
   const currentId = state.insights?.current_id || null;
@@ -149,23 +149,34 @@ function renderSessions() {
       ? '当前上下文构成（最近一次请求）\n' + parts.map(p => `${p.label} ${cnum(p.tokens)} · ${partSum ? Math.round(p.tokens / partSum * 1000) / 10 : 0}%`).join('\n')
       : '无构成数据（无 model-io 记录或超出预解析范围）\n环显示上下文窗口占用';
     const cur = s.id === currentId;
-    return `<button class="sCard${cur ? ' cur' : ''}${s.id === state.sessionId ? ' on' : ''}" data-sid="${esc(s.id)}" aria-label="查看会话：${esc(s.title)}"><div class="sHead"><span class="sTitle">${esc(s.title || '无标题会话')}</span>${cur ? '<span class="curBadge">当前</span>' : ''}<span class="sTimes"><span class="sTime">${agoTs(s.updated)}</span><span class="sCreated">${dateKey(s.created)}</span></span></div><div class="sCrumb"><span class="sPill" data-tip="${esc(s.directory)}">${esc(groupLabel(groupKeyOf(s)))}</span>${s.parent_id ? '<span class="sPill">子代理</span>' : ''}${s.archived ? '<span class="sPill">已归档</span>' : ''}<span class="sPill">${esc(s.model || '未知模型')}</span></div><div class="sBody"><div class="sRing" data-tip="${esc(ringTip)}">${ring}</div><div class="sStats"><div class="sStat"><span class="k">轮次</span><span class="v">${s.turns} 轮 ${s.steps} 步</span></div><div class="sStat"><span class="k">Token 总用量</span><span class="v">${cnum(s.tokens)}</span></div><div class="sStat"><span class="k">上下文窗口</span><span class="v">${cnum(s.window)}</span></div></div></div><div class="sPreview"><span class="k">最新消息</span><span class="v" data-tip="${esc(s.last_msg || '')}">${esc(s.last_msg || '暂无文本消息')}</span><span class="cardArrow" aria-hidden="true">↗</span></div></button>`;
+    return `<button class="sCard${cur ? ' cur' : ''}${s.id === state.sessionId ? ' on' : ''}" data-sid="${esc(s.id)}" aria-label="查看会话：${esc(s.title)}"><div class="sHead"><span class="sTitle">${esc(s.title || '无标题会话')}</span>${cur ? '<span class="curBadge" data-tip="该范围最近更新的主会话">最近活跃</span>' : ''}<span class="sTimes"><span class="sTime">${agoTs(s.updated)}</span><span class="sCreated">${dateKey(s.created)}</span></span></div><div class="sCrumb"><span class="sPill" data-tip="${esc(s.directory)}">${esc(groupLabel(groupKeyOf(s)))}</span>${s.parent_id ? '<span class="sPill">子代理</span>' : ''}${s.archived ? '<span class="sPill">已归档</span>' : ''}<span class="sPill">${esc(s.model || '未知模型')}</span></div><div class="sBody"><div class="sRing" data-tip="${esc(ringTip)}">${ring}</div><div class="sStats"><div class="sStat"><span class="k">轮次</span><span class="v">${s.turns} 轮 ${s.steps} 步</span></div><div class="sStat"><span class="k">Token 总用量</span><span class="v">${cnum(s.tokens)}</span></div><div class="sStat"><span class="k">上下文窗口</span><span class="v">${cnum(s.window)}</span></div></div></div><div class="sPreview"><span class="k">最新消息</span><span class="v" data-tip="${esc(s.last_msg || '')}">${esc(s.last_msg || '暂无文本消息')}</span><span class="cardArrow" aria-hidden="true">↗</span></div></button>`;
   }).join('') + pager || '<div class="empty">当前筛选没有匹配会话。可清除筛选或扩大时间范围。</div>');
 }
 
 let trendValues = [];
 function renderTrend() {
-  const data = state.ctx, steps = data?.steps || [], box = document.getElementById('ctxTrend');
+  const data = state.ctx, allSteps = data?.steps || [], box = document.getElementById('ctxTrend');
+  const turns = new Map();
+  for (const step of allSteps) {
+    if (!step.turn) continue;
+    const t = turns.get(step.turn) || { count:0, input:0 };
+    t.count++; t.input = Math.max(t.input, step.input || 0); turns.set(step.turn,t);
+  }
+  if (!turns.has(state.turnFilter)) state.turnFilter = null;
+  const steps = state.turnFilter ? allSteps.filter(s => s.turn === state.turnFilter) : allSteps;
+  patchHTML('turnNav', turns.size > 1 ? '<details><summary>按轮查看 · ' + turns.size + ' 个已载入轮次</summary><div class="turnNav"><button data-all-turns class="gchip">全部步骤</button>' +
+    [...turns].map(([turn,t],i) => '<button class="gchip ' + (turn === state.turnFilter ? 'on' : '') + '" data-turn-filter="' + esc(turn) + '" title="峰值输入 ' + fmt(t.input) + '">轮 ' + (i+1) + ' · ' + t.count + ' 步</button>').join('') + '</div></details>' : '');
   if (!steps.length) { trendValues = []; state.trendHover = null; state.trendKey = null; renderTrend.signature = null; patchHTML('ctxTrend', '<div class="empty">该会话暂无模型请求记录</div>'); document.getElementById('ctxTrendDetail').hidden = true; return; }
   const sig = JSON.stringify([data.session.id, state.trendMode, steps]);
   if (renderTrend.signature === sig) { updateTrendPick(); return; }
   renderTrend.signature = sig;
   const offset = data.steps_offset || 0, deltaMode = state.trendMode === 'delta';
-  const deltas = calculateInputDeltas(steps);
-  trendValues = steps.map((s, i) => ({ ...s, key: s.id || String(s.ts) + '-' + i, number: offset + i + 1,
+  const deltas = calculateInputDeltas(allSteps);
+  const indices = new Map(allSteps.map((s,i) => [s,i]));
+  trendValues = steps.map((s, i) => ({ ...s, key: s.id || String(s.ts) + '-' + i, number: offset + indices.get(s) + 1,
     cr: s.cache_read, cw: s.cache_write, fi: Math.max(s.input - s.cache_read - s.cache_write, 0), ou: s.output,
-    delta: deltas[i] }));
-  document.getElementById('trendCount').textContent = `${data.session.steps || steps.length} 步${offset ? ' · 展示最近 ' + steps.length + ' 步' : ''}`;
+    delta: deltas[indices.get(s)] }));
+  document.getElementById('trendCount').textContent = `${state.turnFilter ? "本轮 " + steps.length + " 步 / " : ""}${data.session.steps || steps.length} 步${offset ? ' · 展示最近 ' + allSteps.length + ' 步' : ''}`;
   patchHTML('trendLegend', deltaMode ? '<span><i style="background:#3b82f6"></i>输入增长</span><span><i style="background:#e5735f"></i>输入减少</span><span>相对上一有效请求 · 无上报值不计算</span>' : '<span><i style="background:#22c55e"></i>缓存读</span><span><i style="background:#a855f7"></i>缓存写</span><span><i style="background:#3b82f6"></i>新输入</span><span><i style="background:#f59e0b"></i>输出</span><span>⌁ 耗时</span>');
   const H = 190, top = 24, bottom = 158, plotH = bottom - top, slot = 17, left = 42, width = left + steps.length * slot + 42;
   const max = Math.max(1, ...trendValues.map(v => deltaMode ? Math.abs(v.delta || 0) : v.input + v.output));
@@ -190,7 +201,7 @@ function renderTrend() {
     if (v.status === 'error') svg += `<circle cx="${x + 7}" cy="${top - 10}" r="3" fill="var(--bad)"/>`;
     if (i % 5 === 0) svg += `<text x="${x + 7}" y="12" text-anchor="middle" class="axisText">${v.number}</text>`;
     svg += '</g>';
-    if (i === 0 || steps[i - 1].turn !== v.turn) svg += `<text x="${x + 3}" y="179" class="axisText">${esc(v.turn || '—')}</text>`;
+    if (i === 0 || steps[i - 1].turn !== v.turn) svg += `<text x="${x + 3}" y="179" class="axisText">${esc(v.turn?.slice(-8) || '—')}</text>`;
     points.push([x + 7, bottom - v.dur / maxDur * plotH]);
   });
   if (!deltaMode) {
@@ -226,25 +237,31 @@ function hoverTrend(group) {
 }
 function pickTrend(key) { state.trendHover = null; state.trendKey = state.trendKey === key ? null : key; updateTrendPick(); }
 function updateTrendPick() {
+  if (typeof followTrendSnapshot === 'function') followTrendSnapshot();
   document.querySelectorAll('#ctxTrend [data-step]').forEach(g => { g.classList.toggle('selected', g.dataset.step === state.trendKey); g.classList.toggle('hovered', g.dataset.step === state.trendHover); g.setAttribute('aria-pressed', String(g.dataset.step === state.trendKey)); });
   const active = state.trendHover || state.trendKey;
   document.querySelectorAll('#ctxEvents [data-event-ts]').forEach(row => {
-    const nearest = trendValues.reduce((best, v) => !best || Math.abs(v.ts - Number(row.dataset.eventTs)) < Math.abs(best.ts - Number(row.dataset.eventTs)) ? v : best, null);
+    const nearest = row.dataset.eventStep ? {key: row.dataset.eventStep} : trendValues.reduce((best, v) => !best || Math.abs(v.ts - Number(row.dataset.eventTs)) < Math.abs(best.ts - Number(row.dataset.eventTs)) ? v : best, null);
     row.classList.toggle('eventHot', !!active && nearest?.key === active);
   });
   const v = trendValues.find(v => v.key === active), el = document.getElementById('ctxTrendDetail'); el.hidden = !v;
   if (!v) return;
-  patchHTML('ctxTrendDetail', `<div class="hd"><b>${state.trendHover && state.trendHover !== state.trendKey ? '预览' : '已固定'} · 第 ${v.number} 步</b><span class="tm">${new Date(v.ts).toLocaleString('zh-CN')}</span><button class="textButton" onclick="state.trendKey=null;state.trendHover=null;updateTrendPick()">取消选择 ×</button></div><div class="stepMetrics"><span>输入 <b>${fmt(v.input)}</b></span><span>输出 <b>${fmt(v.output)}</b></span><span>缓存命中 <b>${v.input ? (v.cr / v.input * 100).toFixed(1) : '0'}%</b></span><span>耗时 <b>${durMs(v.dur)}</b></span></div><div class="stepNote">${esc(v.model)} · ${v.status === 'error' ? '请求失败：' + esc(v.error || '未知错误') : v.status === 'running' ? '请求执行中' : v.status === 'cancelled' ? '请求已取消' : '请求已完成'}${v.delta != null ? ' · 输入变化 ' + (v.delta > 0 ? '+' : '') + fmt(v.delta) : v.input > 0 ? '' : ' · 未报告输入，不计算增量'}</div>`);
+  patchHTML('ctxTrendDetail', `<div class="hd"><b>${state.trendHover && state.trendHover !== state.trendKey ? '预览' : '已固定'} · 第 ${v.number} 步</b><span class="tm">${new Date(v.ts).toLocaleString('zh-CN')}</span><button class="textButton" onclick="state.trendKey=null;state.trendHover=null;updateTrendPick()">取消选择 ×</button><button class="textButton" data-step-browser>查看此步内容 ↓</button></div><div class="stepMetrics"><span>输入 <b>${fmt(v.input)}</b></span><span>输出 <b>${fmt(v.output)}</b></span><span>缓存命中 <b>${v.input ? (v.cr / v.input * 100).toFixed(1) : '0'}%</b></span><span>耗时 <b>${durMs(v.dur)}</b></span></div><div class="stepNote">${esc(v.model)} · ${v.status === 'error' ? '请求失败：' + esc(v.error || '未知错误') : v.status === 'running' ? '请求执行中' : v.status === 'cancelled' ? '请求已取消' : '请求已完成'}${v.delta != null ? ' · 输入变化 ' + (v.delta > 0 ? '+' : '') + fmt(v.delta) : v.input > 0 ? '' : ' · 未报告输入，不计算增量'}</div>`);
 }
 function renderEvents() {
   const events = state.ctx?.events || [];
-  document.getElementById('ctxEvSub').textContent = `${events.length} 条`;
+  const labels = {compact:'压缩', overflow:'超限', error:'失败', switch:'切换模型', spawn:'派出代理', cancel:'取消'};
+  const filtered = events.filter(e => !state.eventType || e.type === state.eventType);
+  patchHTML('eventFilters', events.length ? ['', ...new Set(events.map(e => e.type))].map(type =>
+    '<button data-event-type="' + esc(type) + '" aria-pressed="' + ((state.eventType || '') === type) + '" class="' + ((state.eventType || '') === type ? 'on' : '') + '">' + esc(labels[type] || '全部') + '</button>').join('') : '');
+  const nearby = ts => trendValues.reduce((best,v) => !best || Math.abs(v.ts-ts) < Math.abs(best.ts-ts) ? v : best, null)?.key || '';
+  document.getElementById('ctxEvSub').textContent = Math.min(80,filtered.length) + ' / ' + events.length + ' 条';
   const icons = { compact: '↓', overflow: '!', error: '!', switch: '⇄', spawn: '+', cancel: '⊘' };
-  patchHTML('ctxEvents', [...events].reverse().slice(0, 80).map(e => `<button class="evRow" data-event-ts="${e.ts}" data-tip="${esc(e.detail || '')}\n${new Date(e.ts).toLocaleString('zh-CN')}\n点击定位最近请求"><span class="ic">${icons[e.type] || '·'}</span><span class="ty ${e.type}">${esc(e.label)}</span><span class="ds">${esc(e.detail || '')}</span><span class="tm">${agoTs(e.ts)}</span></button>`).join('') || '<div class="empty">该会话暂无上下文事件</div>');
+  patchHTML('ctxEvents', [...filtered].reverse().slice(0, 80).map(e => `<button class="evRow" data-event-ts="${e.ts}" data-event-step="${esc(nearby(e.ts))}" data-tip="${esc(e.detail || '')}\n${new Date(e.ts).toLocaleString('zh-CN')}\n按时间定位最近的已载入请求（近似）"><span class="ic">${icons[e.type] || '·'}</span><span class="ty ${e.type}">${esc(e.label)}</span><span class="ds">${esc(e.detail || '')}</span><span class="tm">${agoTs(e.ts)}</span></button>`).join('') || '<div class="empty">该会话暂无上下文事件</div>');
   updateTrendPick();
   document.getElementById('ctxEvents').onclick = e => {
     const row = e.target.closest('[data-event-ts]'); if (!row || !trendValues.length) return;
-    const v = [...trendValues].sort((a, b) => Math.abs(a.ts - Number(row.dataset.eventTs)) - Math.abs(b.ts - Number(row.dataset.eventTs)))[0];
+    const v = trendValues.find(v => v.key === row.dataset.eventStep); if (!v) return;
     state.trendHover = null; state.trendKey = v.key; updateTrendPick(); const g = [...document.querySelectorAll('[data-step]')].find(g => g.dataset.step === v.key); reveal(g); g?.focus();
   };
 }

@@ -56,7 +56,7 @@ async page => {
   await page.keyboard.press('Escape');
   await f.locator('[data-snapshot=prev]').click();
   await f.locator('#browserPanel[aria-busy=false]').waitFor();
-  check((await f.locator('#browserMeta').innerText()).includes('122.5k'), 'previous snapshot not displayed');
+  check((await f.locator('#snapshotScope strong').innerText()).includes('上一请求'), 'previous snapshot not displayed');
   await f.locator('[data-snapshot=live]').click();
   await f.locator('#browserPanel[aria-busy=false]').waitFor();
   results.push('DNA order, search, map, previous snapshot');
@@ -84,11 +84,12 @@ async page => {
   check(await f.locator('#insSessions .sCard').count() === 2, 'session search failed');
   await f.locator('#clearSessionFilters').click();
   await f.locator('#insDailyChart [data-day]').first().click();
+  await f.locator('#dayScope [data-clear-day]').waitFor();
   check(await f.locator('#insSessions .sCard').count() === 2, 'day filter failed');
   await f.locator('#clearSessionFilters').click();
   results.push('archive, search and day filters');
 
-  await f.locator('#insCmdsList [data-activity]').first().click();
+  await f.locator('#insCmdsList .rankDetail').first().click();
   await f.locator('#activitySummary [data-lens=failed]').waitFor();
   await f.locator('#activitySummary [data-lens=failed]').click();
   check(await f.locator('#activityRows .activityRecord').count() === 6, 'failed command filter failed');
@@ -107,9 +108,9 @@ async page => {
   check(await f.locator('.agentCard').count() === 3, 'agent graph missing');
   await f.locator('#agentEdges path').first().waitFor({state:'attached'});
   check(await f.locator('#agentEdges path').first().evaluate(el => el.namespaceURI === 'http://www.w3.org/2000/svg' && el.getTotalLength() > 20), 'agent connectors did not render as SVG');
-  await f.locator('.agentChildren .agentCard').first().hover();
+  await f.locator('.treeKids .agentCard').first().hover();
   check(await f.locator('.agentHot').count() === 2, 'agent graph and row not linked');
-  await f.locator('.agentChildren .agentCard').first().click();
+  await f.locator('.treeKids .agentCard').first().click();
   check(await f.locator('#agentInspector').innerText().then(t => t.includes('已固定')), 'agent inspector did not pin');
   check(await f.locator('#agentEdges .edgeHot').count() === 1, 'agent edge did not follow selection');
   await f.locator('#refreshBtn').click();
@@ -136,5 +137,15 @@ async page => {
   await f.locator('#themebtn').click();
   results.push('760px / 390px all pages, reduced motion, theme');
   check(errors.length === 0, errors.join('\n'));
+  await f.locator('[data-snapshot="live"]').click();
+  await f.locator('#snapshotScope strong').waitFor();
+  const sixth = f.locator('#ctxTrend [data-step]').nth(5), ninth = f.locator('#ctxTrend [data-step]').nth(8);
+  await sixth.locator('.trendHit').click();
+  await f.locator('#snapshotScope strong').filter({hasText:'第 6 步'}).waitFor();
+  await ninth.locator('.trendHit').hover();
+  await f.locator('#snapshotScope strong').filter({hasText:'第 9 步'}).waitFor();
+  await f.locator('#browserPanel .lc-title').hover();
+  await f.locator('#snapshotScope strong').filter({hasText:'第 6 步'}).waitFor();
+  results.push('固定第六步、悬浮第九步、移开恢复');
   return {passed:results,errors};
 }

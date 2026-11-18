@@ -87,7 +87,7 @@
 
     <section class="card detail" id="healthCard">
       <div class="detailHead">
-        <h3>系统健康度</h3>
+        <h3>系统健康度</h3><span class="muted">点击日期查看本机会话</span>
         <div class="seg" id="healthDays">
           <button data-d="1">今天</button><button data-d="7" class="on">7 天</button><button data-d="30">30 天</button>
         </div>
@@ -118,7 +118,7 @@
       <div class="kpiGrid" id="insKpis"><div class="skel skelBlock" style="height:118px;border-radius:10px"></div></div>
       <section class="card dailyCard">
         <div class="lc-title"><span class="t" id="insDailyTitle">近 7 天用量</span><span class="s" id="insDailySub"></span></div>
-        <div class="dailyChart" id="insDailyChart"><div class="skel skelBlock" style="height:128px;border-radius:6px"></div></div>
+        <div id="dayScope" class="dayScope"></div><div class="dailyChart" id="insDailyChart"><div class="skel skelBlock" style="height:128px;border-radius:6px"></div></div>
         <div class="chartLegend"><span><i style="background:linear-gradient(180deg,#22c55e 0 33.4%,#3b82f6 33.4% 66.7%,#f59e0b 66.7%)"></i>Token（缓存/输入/输出）</span><span><i style="background:#06b6d4"></i>费用（仅含支持计价映射的模型）</span></div>
       </section>
     </div>
@@ -142,7 +142,7 @@
         <div class="chipbar" id="sessSort">
           <button data-k="updated" class="on">最近更新</button>
           <button data-k="tokens">Token 总用量</button>
-          <button data-k="context">当前 Context</button>
+          <button data-k="context">上下文占用</button>
         </div>
       </div>
       <div class="groupChips" id="sessGroups"></div>
@@ -154,26 +154,26 @@
   <!-- ========== 上下文 ========== -->
   <div class="tabpage densePage" id="tab-context" hidden>
     <div class="ctxHead">
-      <select id="ctxSession" aria-label="选择会话"></select>
+      <button id="backToActivity" class="textButton" hidden>← 返回执行明细</button><select id="ctxSession" aria-label="选择会话"></select>
       <span class="livechip" id="ctxLive"><i></i>Live · 最新请求</span>
       <span style="font-size:11px;color:var(--faint);margin-left:auto" id="ctxWinInfo"></span>
     </div>
     <div class="err" id="ctxErr"></div>
     <div class="ctxTop">
       <section class="card">
-        <div class="lc-title"><span class="t">Context Stats</span><span class="s" id="ctxStatsSub"></span></div>
+        <div class="lc-title"><span class="t">会话统计</span><span class="s" id="ctxStatsSub"></span></div>
         <div class="csKpis" id="ctxStats"><div class="skel skelBlock" style="height:92px;border-radius:8px"></div></div>
         <div class="csEvents" id="ctxEvCounts"></div>
         <div class="csRows">
-          <div><div class="csRow"><span class="k">Input / Output</span><span class="n" id="ctxIoN"></span></div><div class="chipRow" id="ctxIoChips"></div></div>
-          <div><div class="csRow"><span class="k">Tool Calls</span><span class="n" id="ctxToolN"></span></div><div class="chipRow" id="ctxToolChips"></div></div>
-          <div><div class="csRow"><span class="k">Command Executions</span><span class="n" id="ctxCmdN"></span></div><div class="chipRow" id="ctxCmdChips"></div></div>
+          <div><div class="csRow"><span class="k">输入与回答</span><span class="n" id="ctxIoN"></span></div><div class="chipRow" id="ctxIoChips"></div></div>
+          <div><div class="csRow"><span class="k">工具调用</span><span class="n" id="ctxToolN"></span><button class="textButton" data-activity="tools">全部明细</button><button class="textButton" data-activity="files">文件活动</button></div><div class="chipRow" id="ctxToolChips"></div></div>
+          <div><div class="csRow"><span class="k">命令执行</span><span class="n" id="ctxCmdN"></span><button class="textButton" data-activity="commands">全部明细</button></div><div class="chipRow" id="ctxCmdChips"></div></div>
           <div><div class="csRow"><span class="k">Agent 家族</span><span class="n" id="ctxFleetN"></span></div><div class="chipRow" id="ctxFleetRows"></div></div>
         </div>
       </section>
       <section class="card infoCard">
-        <div class="lc-title"><span class="t">会话信息</span></div>
-        <div id="ctxInfo"><div class="skel skelBlock" style="height:120px;border-radius:8px"></div></div>
+        <details><summary class="lc-title">会话信息</summary>
+        <div id="ctxInfo"><div class="skel skelBlock" style="height:120px;border-radius:8px"></div></div></details>
       </section>
     </div>
     <div class="ovMid">
@@ -182,31 +182,31 @@
     </div>
     <div class="ctxWorkspace"><div class="ctxPrimary">
       <section class="card" id="currentCard">
-        <div class="lc-title"><span class="t">Current Context</span><span class="s" id="ctxCurModel"></span></div>
+        <div class="lc-title"><span class="t">当前上下文</span><span class="s" id="ctxCurModel"></span></div>
         <div class="bigCtx"><span class="n" id="ctxCurN">—</span><span class="w" id="ctxCurW"></span><span class="pct" id="ctxCurPct"></span></div>
         <div class="stackBar" id="ctxCurBar"><div class="skel skelBlock" style="height:10px;border-radius:5px"></div></div>
         <div class="catLegend" id="ctxCurLegend"><div class="skel skelBlock" style="height:40px;border-radius:6px;margin-top:8px"></div></div><div class="estimateNote" id="estimateNote"></div>
       </section>
     <section class="card" style="margin-bottom:12px">
       <div class="lc-title">
-        <span class="t">Context Trend</span><span class="s" id="trendCount"></span>
+        <span class="t">请求趋势</span><span class="s" id="trendCount"></span>
         <span class="ctl chipbar" id="trendMode">
           <button data-m="total" class="on">总量</button>
           <button data-m="delta">增量</button>
         </span>
       </div>
-      <div id="trendLegend" class="chartLegend"></div>
+      <div id="turnNav" class="turnNav"></div><div id="trendLegend" class="chartLegend"></div>
       <div class="trendBox" id="ctxTrend"><div class="skel skelBlock" style="height:190px;border-radius:6px"></div></div>
       <div class="trendDetail" id="ctxTrendDetail" hidden></div>
     </section>
     <section class="card">
-      <div class="lc-title"><span class="t">Context Events</span><span class="s" id="ctxEvSub"></span></div>
-      <div class="evList" id="ctxEvents"><div class="skel skelBlock" style="height:170px;border-radius:8px"></div></div>
+      <div class="lc-title"><span class="t">上下文事件</span><span class="s" id="ctxEvSub"></span></div>
+      <div class="chipbar" id="eventFilters" aria-label="事件类型"></div><div class="evList" id="ctxEvents"><div class="skel skelBlock" style="height:170px;border-radius:8px"></div></div>
     </section>
     </div>
       <section class="card browserPanel" id="browserPanel">
         <div class="lc-title">
-          <span class="t">Context Browser</span>
+          <span class="t">上下文浏览器</span>
           <span class="ctl chipbar" id="dnaMode">
             <button data-m="tree" class="on">分类</button>
             <button data-m="dna">DNA</button><button data-m="map">矩形图</button>
@@ -216,13 +216,14 @@
           <div class="chipbar" id="browserSnapshot"><button data-snapshot="live" class="on">最新请求</button><button data-snapshot="prev">上一请求</button></div>
           <span id="browserMeta" class="muted"></span>
         </div>
+        <div class="snapshotScope" id="snapshotScope" aria-live="polite"></div>
         <div id="browserStrip" class="dnaStrip" aria-label="上下文条目分布"><div class="skel skelBlock" style="height:26px;border-radius:5px"></div></div>
-        <div class="browserSearch"><input type="search" class="searchInput" id="browserSearch" aria-label="搜索上下文条目" placeholder="搜索条目、内容或工具…"><button id="browserClear" class="textButton" hidden>清除</button></div>
+        <div class="browserSearch"><input type="search" class="searchInput" id="browserSearch" aria-label="搜索上下文条目" placeholder="搜索已载入的标题和预览…"><button id="browserClear" class="textButton" hidden>清除</button></div>
         <div class="browserSelection" id="browserSelection" hidden></div>
         <div id="ctxBrowser"><div class="skel skelBlock" style="height:340px;border-radius:8px"></div></div>
       </section>
     </div>
-    <div class="footer">Live 构成解析自本地 model-io 日志尾部 · 只读</div>
+    <div class="footer">快照来源为本机 model-io 日志 · 只读</div>
   </div>
 
   <!-- ========== Agent（Fleet） ========== -->
@@ -257,6 +258,7 @@
         <div class="commsList" id="fleetWork"><div class="skel skelBlock" style="height:130px;border-radius:8px"></div></div>
       </section>
     </div>
+    <details class="card" id="fleetTimeline"><summary>协作时间线</summary><div class="commsList" id="fleetTimelineRows"></div></details>
     <section class="card">
       <div class="lc-title"><span class="t">成员明细</span><span class="s" id="fleetSub"></span></div>
       <div id="fleetMembers"><div class="skel skelBlock" style="height:170px;border-radius:8px"></div></div>
@@ -269,7 +271,7 @@
 <dialog id="itemDialog" class="inspectorDialog" aria-labelledby="inspectorTitle">
   <div class="inspectorHead"><div><div id="inspectorCategory" class="muted"></div><h2 id="inspectorTitle"></h2></div><button id="inspectorClose" class="closeButton" aria-label="关闭详情">×</button></div>
   <div class="inspectorMeta" id="inspectorMeta"></div>
-  <div class="inspectorActions"><button id="inspectorPrev">← 上一条</button><button id="inspectorNext">下一条 →</button><span></span><button id="inspectorCopy">复制内容</button></div>
+  <div class="inspectorActions"><button id="inspectorPrev">← 上一条</button><button id="inspectorNext">下一条 →</button><button id="inspectorPair" hidden>关联条目</button><button id="inspectorFormat" hidden>格式化 JSON</button><span></span><button id="inspectorCopy">复制内容</button></div>
   <pre id="inspectorContent" tabindex="0"></pre><div id="inspectorNote" class="muted"></div>
 </dialog>
 <script>/* @inline:app.js */</script>

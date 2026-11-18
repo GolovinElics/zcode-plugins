@@ -14,13 +14,21 @@
   function sendInit() {
     tries++;
     send({ jsonrpc: "2.0", id: INIT_ID, method: "ui/initialize", params: {
-      appInfo: { name: "glm-usage-panel", title: "GLM 用量 · 上下文洞察", version: "2.8.6" },
+      appInfo: { name: "glm-usage-panel", title: "GLM 用量 · 上下文洞察", version: "2.9.0" },
       appCapabilities: {}, protocolVersion: "2026-01-26" } });
   }
   window.addEventListener("message", function (ev) {
     if (ev.source !== window.parent) return;
     var d = ev.data;
     if (!d || typeof d !== "object" || d.jsonrpc !== "2.0") return;
+    if (d.method === 'ui/notifications/tool-input') {
+      const args = d.params?.arguments || {};
+      if (['usage','insights','context','agent'].includes(args.tab)) {
+        window.glmOpenTarget = {tab:args.tab, sessionId:typeof args.session_id === 'string' && /^[a-zA-Z0-9_-]{1,120}$/.test(args.session_id) ? args.session_id : null};
+        window.dispatchEvent(new CustomEvent('glm-open-target'));
+      }
+      return;
+    }
     if (d.id === INIT_ID && d.result) {
       if (gotReply) return;
       gotReply = true;

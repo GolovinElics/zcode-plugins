@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 function runtime() {
-  const nodes=new Map(), timers=[];
+  const nodes=new Map(), timers=[], listeners={};
   const node=()=>({style:{},dataset:{},value:'',textContent:'',innerHTML:'',querySelector:()=>null,addEventListener(){},setAttribute(){},getAttribute(){return 'dark';},classList:{add(){},remove(){},toggle(){},contains:()=>false}});
   const document={hidden:false,documentElement:node(),getElementById:id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);},querySelectorAll:()=>[]};
-  const r=vm.createContext({document,window:{addEventListener(){}},setInterval:fn=>{timers.push(fn);return timers.length;},clearInterval(){},setBusy(){},console});
+  const r=vm.createContext({document,window:{addEventListener(name,fn){listeners[name]=fn;}},setInterval:fn=>{timers.push(fn);return timers.length;},clearInterval(){},clearTimeout, setBusy(){},console});
   vm.runInContext(readFileSync(new URL('../plugin/app.js',import.meta.url),'utf8'),r);
-  return {r,nodes,timers};
+  return {r,nodes,timers,listeners};
 }
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 const response=data=>({content:[{type:'text',text:JSON.stringify({ok:true,data})}]});
@@ -30,12 +30,12 @@ test('late context response cannot overwrite the newer session or fetch its brow
 });
 test('late insights and snapshot responses do not change the selected scope',async()=>{
   const {r}=runtime(),pending=[];r.callTool=()=>{const d=deferred();pending.push(d);return d.promise;};
-  for(const name of ['renderInsights','fillSessionSelect','renderSessions','animateSwap','renderBrowser','renderCurrent'])r[name]=()=>{};
+  for(const name of ['renderInsights','fillSessionSelect','renderSessions','animateSwap','renderBrowser','renderCurrent','renderSnapshotScope'])r[name]=()=>{};
   r.state.range='today';const oldRange=r.loadInsights();r.state.range='30d';const nextRange=r.loadInsights();
   pending[1].resolve({sessions:[],label:'month'});await nextRange;pending[0].resolve({sessions:[],label:'today'});await oldRange;
   assert.equal(r.state.insights.label,'month');
   r.state.sessionId='b';r.state.snapshot='prev';const oldSnapshot=r.loadBrowser();r.state.snapshot='live';const nextSnapshot=r.loadBrowser();
-  pending[3].resolve({request_id:'live'});await nextSnapshot;pending[2].resolve({request_id:'prev'});await oldSnapshot;
+  pending[3].resolve({request_id:'live',cats:[]});await nextSnapshot;pending[2].resolve({request_id:'prev',cats:[]});await oldSnapshot;
   assert.equal(r.state.browser.request_id,'live');
 });
 test('current session remains an option when the insight date filter excludes it',()=>{
@@ -74,4 +74,16 @@ test('renderSubline reflects paused auto pull', async () => {
   assert.match(r.document.getElementById('subline').innerHTML, /已暂停/);
   r.renderSubline(45);
   assert.match(r.document.getElementById('subline').innerHTML, /每 45 秒/);
+});
+
+test('从已暂停配置冷启动只加载首屏，三个时钟周期内无自动请求', async()=>{
+  const {r,timers,listeners}=runtime();
+  const config=deferred();let loads=0;
+  r.restorePersistentViews=async()=>{};r.keyStatus=async()=>{await config.promise;r.REFRESH=0;r.tick=0;};
+  r.switchTab=()=>{loads++;};r.refreshUsage=async()=>{loads++;};
+  const boot=listeners['bridge-ready']();assert.equal(timers.length,0);
+  config.resolve();await boot;
+  for(let i=0;i<3;i++)timers.forEach(f=>f());
+  assert.equal(timers.length,0);assert.equal(loads,1);
+  await r.manualRefresh();assert.equal(loads,2);
 });

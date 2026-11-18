@@ -3,12 +3,14 @@ function browserRows() {
     .sort((a, b) => a.it.seq - b.it.seq);
 }
 function renderCurrent() {
-  const live = state.ctx?.live;
-  document.getElementById('ctxLive').innerHTML = live ? '<i></i>最新请求快照' : '<span>无请求快照</span>';
+  const historical = !!(activeStep() || state.manualKey || state.snapshot === 'prev');
+  const live = historical ? state.browser : state.browser || state.ctx?.live;
+  document.getElementById('ctxWinInfo').textContent = live ? (live.model || '未知模型') + ' · 窗口 ' + cnum(live.window) + ' tokens' + (live.window_source === '估算' ? ' · 估算' : '') : '';
+  document.getElementById('ctxLive').innerHTML = live ? '<i></i>' + esc(stepLabel()) : '<span>' + esc(stepLabel()) + ' · 暂无正文</span>';
   document.getElementById('ctxLive').classList.toggle('unavailable', !live);
   if (!live) {
     document.getElementById('ctxCurN').textContent = '—';
-    document.getElementById('ctxCurW').textContent = '该会话没有可解析的请求记录';
+    document.getElementById('ctxCurModel').textContent = ''; document.getElementById('ctxCurW').textContent = historical ? '该步骤尚无已确认的请求正文' : '该会话没有可解析的请求记录';
     document.getElementById('ctxCurPct').textContent = '';
     patchHTML('ctxCurBar', ''); patchHTML('ctxCurLegend', '');
     document.getElementById('estimateNote').textContent = '历史请求的 Token 和耗时仍可在趋势中查看。'; return;
@@ -16,7 +18,7 @@ function renderCurrent() {
   const win = live.window || 0, used = live.total || 0, max = Math.max(win, used, 1), cats = live.cats || [];
   document.getElementById('ctxCurModel').textContent = live.model || '未知模型';
   document.getElementById('ctxCurN').textContent = (live.estimated ? '≈' : '') + cnum(used);
-  document.getElementById('ctxCurW').textContent = win ? `/ ${cnum(win)} tokens` : 'tokens · 窗口未知';
+  document.getElementById('ctxCurW').textContent = win ? `/ ${cnum(win)} tokens${live.window_source === "估算" ? " · 默认窗口估算" : ""}` : 'tokens · 窗口未知';
   const pct = win ? used / win * 100 : null, p = document.getElementById('ctxCurPct');
   p.textContent = pct == null ? '' : `${pct.toFixed(1)}% 已使用`; p.style.color = pct > 80 ? 'var(--bad)' : pct > 60 ? 'var(--mid)' : 'var(--fg)';
   patchHTML('ctxCurBar', cats.filter(c => c.tokens > 0).map(c => `<button data-key="${c.key}" data-cat="${c.key}" data-pick-cat="${c.key}" aria-label="查看${esc(c.label)}，约${fmt(c.tokens)} tokens" style="width:${c.tokens / max * 100}%;background:${CAT_HEX[c.key]}" data-tip="${esc(c.label)} · ≈${fmt(c.tokens)} tokens · ${c.pct}%\n点击定位到上下文浏览器"></button>`).join('') + (win > used ? `<span class="reserve" style="width:${(win - used) / max * 100}%" data-tip="可用窗口 ${fmt(win - used)} tokens"></span>` : ''));
@@ -25,7 +27,7 @@ function renderCurrent() {
   highlightCategory();
 }
 function pickCategory(key) {
-  state.catPick = state.catPick === key ? null : key;
+  state.contentKind = null; state.catPick = state.catPick === key ? null : key;
   if (state.catPick) state.expanded.add(key);
   renderCurrent(); renderBrowser();
   const el = [...document.querySelectorAll('[data-cat-row]')].find(el => el.dataset.catRow === key);
@@ -35,24 +37,29 @@ function browserItem(row, dna = false) {
   const { c, it } = row;
   return `<button class="${dna ? 'dnaRow' : 'brItem'}" data-key="item-${it.id}" data-cat="${c.key}" data-item="${esc(it.id)}" style="--cat:${CAT_HEX[c.key]}" data-tip="${esc(it.title)}\n≈${fmt(it.tokens)} tokens · ${fmt(it.chars)} 字符\n${esc(it.preview)}" aria-label="查看${esc(it.title)}的内容">${dna ? `<span class="ix">${it.seq + 1}</span><i class="cd" style="background:var(--cat)"></i>` : ''}<span class="nm"><b>${esc(it.title)}</b><span class="itemPreview">${esc(it.preview)}</span></span><span class="tk">≈${cnum(it.tokens)}<span>${esc(it.kind)}</span></span><span class="itemChevron" aria-hidden="true">›</span></button>`;
 }
+function filteredBrowserRows(rows = browserRows()) {
+  const query = state.browserQuery;
+  return rows.filter(r => (!query || `${r.it.title} ${r.it.preview} ${r.c.label} ${r.it.kind}`.toLowerCase().includes(query)) &&
+    (!state.catPick || r.c.key === state.catPick) && (!state.contentKind || r.it.kind === state.contentKind));
+}
 function renderBrowser() {
   const b = state.browser; if (!b) return;
   const rows = browserRows();
   if (state.stripFocus && !rows.some(r => r.it.id === state.stripFocus)) state.stripFocus = null;
   const query = state.browserQuery;
-  const filtered = rows.filter(r => (!query || `${r.it.title} ${r.it.preview} ${r.c.label} ${r.it.kind}`.toLowerCase().includes(query)) && (!state.catPick || r.c.key === state.catPick));
+  const filtered = filteredBrowserRows(rows);
   document.getElementById('browserClear').hidden = !query;
   const itemCount = b.cats.reduce((n, c) => n + (c.count ?? c.items.length), 0);
   document.getElementById('browserMeta').textContent = `${rows.length < itemCount ? rows.length + '/' + itemCount + ' 项预览' : rows.length + ' 项'} · ${b.estimated ? '估算' : '输入'} ${cnum(b.total || b.actual_input)} tok`;
   const prevButton = document.querySelector('[data-snapshot="prev"]'); prevButton.disabled = !b.has_previous;
   document.querySelectorAll('[data-snapshot]').forEach(el => { el.classList.toggle('on', el.dataset.snapshot === state.snapshot); el.setAttribute('aria-pressed', String(el.dataset.snapshot === state.snapshot)); });
   document.querySelectorAll('#dnaMode button').forEach(el => el.setAttribute('aria-pressed', String(el.dataset.m === state.dna)));
-  const selection = document.getElementById('browserSelection'); selection.hidden = !state.catPick;
-  if (state.catPick) {
+  const selection = document.getElementById('browserSelection'); selection.hidden = !state.catPick && !state.contentKind;
+  if (state.catPick || state.contentKind) {
     const cat = b.cats.find(c => c.key === state.catPick);
-    patchHTML('browserSelection', `<span><i style="background:${CAT_HEX[state.catPick]}"></i>${esc(cat?.label || '')} · ${filtered.length} 项</span><button class="textButton" data-pick-cat="${state.catPick}">清除分类 ×</button>`);
+    patchHTML('browserSelection', `<span><i style="background:${CAT_HEX[state.catPick]}"></i>${esc((cat?.label || '') + (state.contentKind === 'answer' ? ' · 回答' : ''))} · ${filtered.length} 项</span><button class="textButton" data-pick-cat="${state.catPick}">清除分类 ×</button>`);
   }
-  patchHTML('browserStrip', rows.map(r => `<button data-key="strip-${r.it.id}" tabindex="${r.it.id === (state.stripFocus || rows[0]?.it.id) ? 0 : -1}" data-item="${r.it.id}" data-cat="${r.c.key}" style="flex:${Math.max(1, r.it.tokens)};background:${CAT_HEX[r.c.key]}" data-tip="${esc(r.c.label)} · ${esc(r.it.title)}\n≈${fmt(r.it.tokens)} tokens" aria-label="${esc(r.it.title)}，约${fmt(r.it.tokens)} tokens"></button>`).join(''));
+  patchHTML('browserStrip', filtered.map(r => `<button data-key="strip-${r.it.id}" tabindex="${r.it.id === (state.stripFocus || filtered[0]?.it.id) ? 0 : -1}" data-item="${r.it.id}" data-cat="${r.c.key}" style="flex:${Math.max(1, r.it.tokens)};background:${CAT_HEX[r.c.key]}" data-tip="${esc(r.c.label)} · ${esc(r.it.title)}\n≈${fmt(r.it.tokens)} tokens" aria-label="${esc(r.it.title)}，约${fmt(r.it.tokens)} tokens"></button>`).join(''));
   const strip = document.getElementById('browserStrip');
   strip.onfocusin = e => {
     const button = e.target.closest('[data-item]'); if (!button) return;
@@ -79,8 +86,8 @@ function renderBrowser() {
   } else {
     html = '<div class="brCats">' + b.cats.filter(c => !state.catPick || c.key === state.catPick).map(c => {
       const items = filtered.filter(r => r.c.key === c.key);
-      if (query && !items.length) return '';
-      const open = state.expanded.has(c.key) || !!query;
+      if ((query || state.contentKind) && !items.length) return '';
+      const open = state.expanded.has(c.key) || !!query || !!state.contentKind;
       const limit = state.rowLimits?.[c.key] || 80;
       return `<section class="brCat ${open ? 'open' : ''}" data-cat-row="${c.key}" data-cat="${c.key}" style="--cat:${CAT_HEX[c.key]}"><button class="brCatHead" data-toggle-cat="${c.key}" aria-expanded="${open}" aria-controls="items-${c.key}"><span class="cv">›</span><i class="cd" style="background:var(--cat)"></i><span class="nm">${esc(c.label)} <span>${query ? items.length : c.count ?? c.items.length} 项${c.truncated ? ' · 预览 ' + c.items.length : ''}</span></span><span class="tk">≈${cnum(c.tokens)}</span><span class="pc">${c.pct}%</span></button><div class="brFold" ${open ? '' : 'inert'}><div><div class="brItems" id="items-${c.key}">${items.slice(0, limit).map(r => browserItem(r)).join('') || '<div class="empty">暂无此类内容</div>'}${open && items.length > limit ? `<button class="loadMore" data-more="${c.key}">再显示 ${Math.min(100, items.length - limit)} 项 · 共 ${items.length} 项</button>` : ''}${open && c.truncated ? '<div class="estimateNote">此分类最多返回 400 项预览，分类总量包含全部条目。</div>' : ''}</div></div></div></section>`;
     }).join('') + '</div>';
@@ -98,7 +105,7 @@ function renderBrowser() {
 function agentCard(a, role) {
   const color = role === 'lead' ? '#14b8a6' : ['#6366f1', '#f59e0b', '#3b82f6'][Math.abs(hash(a.id)) % 3];
   const pct = a.window ? a.context / a.window * 100 : 0;
-  const state = `<span class="runState${a.running ? ' on' : ''}">${a.running ? '运行中' : '空闲'}</span>`;
+  const state = `<span class="runState${a.running ? ' on' : ''}">${a.running ? '近期活跃' : '近期无更新'}</span>`;
   return `<button class="agentCard ${role === 'lead' ? 'lead' : ''}" data-agent="${esc(a.id)}" style="--agent:${color}"><div class="ah"><span class="ad" style="background:${color}"></span><span class="an">${esc(a.title || a.id)}</span><span class="sPill">${role === 'lead' ? '主会话' : '子代理'}</span></div><div class="am">${esc(a.model || '未知模型')} · ${a.steps} 步</div><div class="agentValue">${cnum(a.context)}<span> / ${cnum(a.window)} tokens</span></div><div class="abar"><i style="width:${Math.min(pct, 100)}%;background:${color}"></i></div><div class="af"><span>累计 ${cnum(a.tokens)} tok</span><span>${pct.toFixed(1)}% 已用</span></div><div class="agentOpen">${state} · 悬浮预览 · 点击固定 <span>⌖</span></div></button>`;
 }
 function renderFleet() {
@@ -120,29 +127,37 @@ function renderFleet() {
   patchHTML('fleetMembers', members.map(m => `<button class="fleetRow" data-agent="${esc(m.id)}"${depthOf.get(m.id) ? ` style="margin-left:${depthOf.get(m.id) * 16}px"` : ''}><span class="avatar">${esc((m.title || '?')[0])}</span><span class="fleetInfo"><span class="fn">${esc(m.title)}</span><span class="fm">${esc(m.model || '未知模型')} · ${m.steps} 步 · ${durMs(m.model_ms)}</span></span><span class="fleetCtx"><span class="fx"><span>Context ${cnum(m.context)}</span><span>${(m.context / Math.max(1, m.window) * 100).toFixed(1)}%</span></span><span class="bar"><i style="width:${Math.min(100, m.context / Math.max(1, m.window) * 100)}%"></i></span></span><span>↗</span></button>`).join('') || '<div class="empty">子代理会话将显示在这里。</div>');
   /* 跨 Agent 协作：委派 / 消息记录，悬浮或点击可定位对应代理 */
   const nameOf = new Map([[leadId, f.lead?.title || '主会话'], ...members.map(m => [m.id, m.title || m.id])]);
-  const comms = f.comms || [];
+  const memberIds = new Set([leadId, ...members.map(m => m.id)]);
+  if (!memberIds.has(state.agentPick)) state.agentPick = null;
+  const comms = (f.comms || []).filter(c => !state.agentPick || c.from === state.agentPick || c.to === state.agentPick);
   const kinds = [['all', '全部'], ['delegate', '委派'], ['message', '消息']];
   const commsKind = state.commsKind || 'all';
   patchHTML('commsChips', kinds.map(([k, label]) => `<button class="${commsKind === k ? 'on' : ''}" data-comms-kind="${k}" aria-pressed="${commsKind === k}">${label} <b>${k === 'all' ? comms.length : comms.filter(c => c.kind === k).length}</b></button>`).join(''));
   const memberOf = id => members.find(m => m.id === id);
   patchHTML('fleetComms', comms.filter(c => commsKind === 'all' || c.kind === commsKind).map(c => {
     const owner = c.to && nameOf.get(c.to) ? c.to : c.from;
-    const target = c.to && nameOf.get(c.to) ? `${nameOf.get(c.from) || '?'} → ${nameOf.get(c.to)}` : nameOf.get(c.from) || '?';
+    const target = c.to && nameOf.get(c.to) ? `${nameOf.get(c.from) || '?'} → ${nameOf.get(c.to)}` : (nameOf.get(c.from) || '?') + ' → 接收方未知';
     const live = !!(c.to && memberOf(c.to)?.running);
-    return `<button class="commsRow" data-agent="${esc(owner)}"><span class="cKind ${c.kind}">${c.kind === 'delegate' ? '委派' : '消息'}</span><span class="cBody"><span class="cDesc" data-tip="${esc(c.description)}">${esc(c.description)}</span><span class="cMeta">${esc(target)} · ${agoTs(c.at)}${c.kind === 'delegate' ? ` · ${live ? '运行中' : '已委派'}` : ''}</span></span><span class="cdot${live ? ' live' : ''}"></span></button>`;
+    return `<details class="fleetRecord" data-key="${esc(c.id || [c.from,c.at,c.kind].join('-'))}"><summary class="commsRow"><span class="cKind ${c.kind}">${c.kind === 'delegate' ? '委派' : '消息'}</span><span class="cBody"><span class="cDesc" data-tip="${esc(c.description)}">${esc(c.description)}</span><span class="cMeta">${esc(target)} · ${agoTs(c.at)}${c.kind === 'delegate' ? ` · ${live ? '近期活跃' : '已委派'}` : ''}</span></span><span class="cdot${live ? ' live' : ''}"></span></summary><div class="stepNote">${esc(c.description)} · ${esc(c.status)} · ${new Date(c.at).toLocaleString('zh-CN')}<br>来源 · 工具记录 <button class="textButton" data-sid="${esc(owner)}">查看会话 ↗</button></div></details>`;
   }).join('') || '<div class="empty">这个编队还没有跨 Agent 事件。</div>');
-  document.getElementById('fleetCommsSub').textContent = `${comms.length} 条记录`;
+  document.getElementById('fleetCommsSub').textContent = `当前 ${comms.filter(c => commsKind === 'all' || c.kind === commsKind).length} / ${(f.comms || []).length} 条`;
   /* 协作任务：全家族待办三态分相 */
-  const works = f.works || [];
+  const works = (f.works || []).filter(w => !state.agentPick || w.sid === state.agentPick);
   const phases = [['all', '全部'], ['in_progress', '运行中'], ['pending', '待处理'], ['completed', '已完成']];
   const workPhase = state.workPhase || 'all';
   const phaseText = s => s === 'completed' ? '已完成' : s === 'in_progress' ? '运行中' : '待处理';
   patchHTML('workChips', phases.map(([p, label]) => `<button class="${workPhase === p ? 'on' : ''}" data-work-phase="${p}" aria-pressed="${workPhase === p}">${label} <b>${p === 'all' ? works.length : works.filter(w => w.status === p).length}</b></button>`).join(''));
   patchHTML('fleetWork', works.filter(w => workPhase === 'all' || w.status === workPhase).map(w => {
     const dot = w.status === 'completed' ? 'done' : w.status === 'in_progress' ? 'ongoing' : 'idle';
-    return `<button class="commsRow" data-agent="${esc(w.sid)}"><span class="wdot ${dot}"></span><span class="cBody"><span class="cDesc" data-tip="${esc(w.content)}">${esc(w.content)}</span><span class="cMeta">${esc(nameOf.get(w.sid) || '?')} · ${agoTs(w.at)}</span></span><span class="cState">${phaseText(w.status)}</span></button>`;
+    return `<details class="fleetRecord" data-key="${esc([w.sid,w.position ?? w.at].join('-'))}"><summary class="commsRow"><span class="wdot ${dot}"></span><span class="cBody"><span class="cDesc" data-tip="${esc(w.content)}">${esc(w.content)}</span><span class="cMeta">${esc(nameOf.get(w.sid) || '?')} · ${agoTs(w.at)}</span></span><span class="cState">${phaseText(w.status)}</span></summary><div class="stepNote">${esc(w.content)} · 优先级 ${esc(w.priority || '未知')} · ${new Date(w.at).toLocaleString('zh-CN')}<br>来源 · 会话待办 <button class="textButton" data-sid="${esc(w.sid)}">查看所属会话 ↗</button></div></details>`;
   }).join('') || '<div class="empty">当前阶段没有协作任务。</div>');
-  document.getElementById('fleetWorkSub').textContent = `${works.length} 项`;
+  document.getElementById('fleetWorkSub').textContent = `当前 ${works.filter(w => workPhase === 'all' || w.status === workPhase).length} / ${(f.works || []).length} 项`;
+  const timeline = [
+    ...comms.map(c => ({ at:c.at, sid:c.from, label:c.kind === 'delegate' ? '委派' : '发送消息', text:c.description, source:'工具记录' })),
+    ...works.map(w => ({ at:w.at, sid:w.sid, label:'待办更新', text:w.content, source:'待办的最近更新时间' })),
+  ].sort((a,b) => b.at-a.at);
+  patchHTML('fleetTimelineRows', timeline.map(x => '<div class="stepNote"><time>' + esc(new Date(x.at).toLocaleString('zh-CN')) + '</time> · ' + esc(x.label) + ' · ' +
+    esc(nameOf.get(x.sid) || '未知成员') + '<br>' + esc(x.text) + ' <button class="textButton" data-sid="' + esc(x.sid) + '">所属会话 ↗</button><small> · ' + esc(x.source) + '</small></div>').join('') || '<div class="empty">当前成员范围没有时间记录。</div>');
   const page = document.getElementById('tab-agent');
   const hover = target => {
     state.agentHover = target?.closest?.('[data-agent]')?.dataset.agent || null;
@@ -223,5 +238,5 @@ function renderAgentInspector() {
   const pct = a.window ? (a.context / a.window * 100).toFixed(1) + '%' : '窗口未知';
   patchHTML('agentInspector', `<div class="agentInspectorHead"><div><span class="muted">${pinned ? '已固定' : '会话预览'}</span><b>${esc(a.title || a.id)}</b></div><button data-sid="${esc(a.id)}" class="textButton">打开上下文 ↗</button>${state.agentPick ? '<button class="textButton" data-agent-clear>取消固定 ×</button>' : ''}</div><div class="stepMetrics"><span>当前上下文<b>${cnum(a.context)} · ${pct}</b></span><span>累计 Token<b>${cnum(a.tokens)}</b></span><span>模型请求<b>${a.steps} 步</b></span><span>模型耗时<b>${durMs(a.model_ms || 0)}</b></span></div><div class="stepNote">${esc(a.model || '未知模型')} · ${a.id === fleet.lead?.id ? '主会话' : '子代理'} · 活跃状态按最近更新时间估算</div>`);
   const clear = document.getElementById('agentInspector').querySelector('[data-agent-clear]');
-  if (clear) clear.onclick = () => { state.agentPick = null; state.agentHover = null; highlightAgent(); renderAgentInspector(); };
+  if (clear) clear.onclick = () => { state.agentPick = null; state.agentHover = null; renderFleet(); };
 }

@@ -6,7 +6,7 @@ import { mcpClient } from './mcp-client.mjs';
 
 const live = process.env.GLM_PREVIEW_LIVE === '1';
 const client = live ? mcpClient() : null;
-const readTools = new Set(['get_view_state', 'get_usage_json', 'get_config', 'get_usage', 'get_usage_detail', 'get_health', 'get_insights', 'get_sessions', 'list_sessions', 'get_session_context', 'get_context_browser', 'get_context_item', 'get_fleet', 'get_activity', 'get_day_sessions', 'get_pricing', 'sync_pricing']);
+const readTools = new Set(['get_view_state', 'get_usage_json', 'get_config', 'get_usage', 'get_usage_detail', 'get_health', 'get_insights', 'get_sessions', 'list_sessions', 'get_session_context', 'get_context_browser', 'get_context_item', 'get_fleet', 'get_activity', 'get_activity_detail', 'get_day_sessions', 'get_pricing', 'sync_pricing']);
 const writeTools = new Set(['save_view_state', 'set_prices', 'set_coding_key', 'set_refresh']); // GLM_PREVIEW_PERSIST=1 时才放行（写本机 ~/.glm-usage）
 
 const port = Number(process.env.GLM_PREVIEW_PORT || 8792);
