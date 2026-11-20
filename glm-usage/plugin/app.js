@@ -818,8 +818,9 @@ async function loadBrowser(silent) {
 function topChips(items, total, colorFn, kind) {
   var show = items.slice(0, 5);
   var html = show.map(function (x, i) {
-    var action = kind ? 'data-activity="' + kind + '" data-pick="' + esc(x.name || x.program) + '"' : 'data-content-kind="' + (i === 0 ? 'user_messages' : 'answer') + '"';
-    return '<button class="mchip" ' + action + '><i style="background:' + colorFn(i) + '"></i>' + esc(x.name || x.program) + " <b>" + x.count + "</b></button>";
+    var nm = x.name || x.program;
+    var action = kind ? 'data-activity="' + kind + '" data-pick="' + esc(nm) + '"' : 'data-content-kind="' + (i === 0 ? 'user_messages' : 'answer') + '"';
+    return '<button class="mchip" ' + action + ' title="' + esc(nm) + '"><i style="background:' + colorFn(i) + '"></i><span class="nm">' + esc(nm) + "</span><b>" + x.count + "</b></button>";
   }).join("");
   if (items.length > 5) html += '<span class="mchip">+' + (items.length - 5) + " 项 · 共 " + total + "</span>";
   return html;
